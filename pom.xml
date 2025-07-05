@@ -62,22 +62,15 @@
 		
 		<dependency>
 			<groupId>com.github.docker-java</groupId>
-			<artifactId>docker-java</artifactId>
-			<version>3.4.0</version>
+				<artifactId>docker-java</artifactId>
+				<version>3.5.2</version>
 		</dependency>
-		
 		<dependency>
 			<groupId>com.github.docker-java</groupId>
 			<artifactId>docker-java-transport-httpclient5</artifactId>
-			<version>3.4.0</version>
+			<version>3.5.2</version>
 		</dependency>
-		
-		<!-- Add explicit junixsocket dependency for better Unix socket support -->
-		<dependency>
-			<groupId>com.kohlschutter.junixsocket</groupId>
-			<artifactId>junixsocket-common</artifactId>
-			<version>2.6.1</version>
-		</dependency>
+
 	</dependencies>
 
 	<build>
