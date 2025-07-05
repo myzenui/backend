@@ -1,0 +1,41 @@
+# Exclude Maven target directory
+target/
+
+# Exclude IDE files
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Exclude Git files
+.git/
+.gitignore
+
+# Exclude system files
+.DS_Store
+Thumbs.db
+
+# Exclude log files
+*.log
+
+# Exclude temporary files
+*.tmp
+*.temp
+
+# Exclude documentation files (unless needed in container)
+*.md
+!README.md
+
+# Exclude Docker files (avoid recursion)
+Dockerfile
+docker-compose.yml
+docker-compose.yaml
+
+# Exclude test files and coverage reports
+coverage/
+*.coverage
+
+# Exclude backup files
+*.bak
+*.backup 
