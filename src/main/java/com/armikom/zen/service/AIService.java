@@ -178,7 +178,7 @@ public class AIService {
                 logger.info("Starting AI-powered background task for job: {}", job.getId());
                 
                 // Get project information
-                Project project = projectService.retrieveAndLogProject(job.getProjectId(), job.getUserId());
+                com.armikom.zen.model.Project project = projectService.retrieveAndLogProject(job.getProjectId(), job.getUserId());
                 if (project == null) {
                     logger.error("Project not found for job {}: projectId={}, userId={}", 
                         job.getId(), job.getProjectId(), job.getUserId());
@@ -404,4 +404,4 @@ public class AIService {
     public boolean isFirebaseAvailable() {
         return firebaseApp != null && firestore != null;
     }
-} 
+}

@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import com.armikom.zen.service.DockerService;
+import com.armikom.zen.service.ProjectService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -23,6 +24,9 @@ public class TestController {
 
     @Autowired
     private DockerService dockerService;
+    
+    @Autowired
+    private ProjectService projectService;
 
     @GetMapping("/hello")
     @Operation(summary = "Hello World", description = "Returns a simple hello world message")
@@ -101,5 +105,66 @@ public class TestController {
         response.put("dockerAvailable", isDockerAvailable);
         
         return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/project/create-db-account")
+    @Operation(summary = "Create Database Account", description = "Create a new database user and database for a project")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Database account created successfully"),
+        @ApiResponse(responseCode = "400", description = "Invalid input parameters"),
+        @ApiResponse(responseCode = "500", description = "Database operation failed")
+    })
+    public ResponseEntity<Map<String, Object>> createDatabaseAccount(
+            @Parameter(description = "Username for the new database user", example = "project_user")
+            @RequestParam String userName,
+            @Parameter(description = "Password for the new database user", example = "StrongPassword123!")
+            @RequestParam String password,
+            @Parameter(description = "Project name (will be used as database name)", example = "myproject")
+            @RequestParam String projectName) {
+        
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            boolean result = projectService.createDbAccount(userName, password, projectName);
+            
+            response.put("success", result);
+            response.put("userName", userName);
+            response.put("projectName", projectName);
+            response.put("message", result ? 
+                "Database account created successfully" : 
+                "Failed to create database account");
+            
+            return result ? ResponseEntity.ok(response) : ResponseEntity.badRequest().body(response);
+            
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("message", "Internal server error: " + e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
+    @GetMapping("/project/test-connection")
+    @Operation(summary = "Test Database Connection", description = "Test the connection to Microsoft SQL Server")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Database connection test completed")
+    })
+    public ResponseEntity<Map<String, Object>> testDatabaseConnection() {
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            boolean connectionWorking = projectService.testConnection();
+            
+            response.put("connectionWorking", connectionWorking);
+            response.put("message", connectionWorking ? 
+                "Database connection successful" : 
+                "Database connection failed");
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            response.put("connectionWorking", false);
+            response.put("message", "Connection test failed: " + e.getMessage());
+            return ResponseEntity.ok(response);
+        }
     }
 } 

@@ -7,47 +7,51 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.PushImageCmd;
 import com.github.dockerjava.api.exception.DockerException;
 import com.github.dockerjava.api.model.PushResponseItem;
+import com.github.dockerjava.api.model.AuthConfig;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientBuilder;
 import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
 import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.transport.DockerHttpClient;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 public class DockerService {
     
     private static final Logger logger = LoggerFactory.getLogger(DockerService.class);
     private DockerClient dockerClient;
+    private boolean dockerAvailable = false;
     
     @PostConstruct
     public void init() {
         try {
-            String dockerHost = determineDockerHost();
-            
-            DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
-                .withDockerHost(dockerHost)
-                .build();
-            
-            ApacheDockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
-                .dockerHost(config.getDockerHost())
-                .sslConfig(config.getSSLConfig())
-                .maxConnections(100)
-                .connectionTimeout(Duration.ofSeconds(30))
-                .responseTimeout(Duration.ofSeconds(45))
-                .build();
-            
-            dockerClient = DockerClientBuilder.getInstance(config)
-                .withDockerHttpClient(httpClient)
-                .build();
-            
-            logger.info("Docker client initialized successfully using host: {}", dockerHost);
-        } catch (Exception e) {
-            logger.error("Failed to initialize Docker client", e);
-            dockerClient = null;
+            DockerClientConfig cfg = DefaultDockerClientConfig
+                    .createDefaultConfigBuilder()
+                    // honour $DOCKER_HOST or fall back sensibly
+                    // .withDockerHost(
+                    //     Optional.ofNullable(System.getenv("DOCKER_HOST"))
+                    //             .orElse("unix:///var/run/docker.sock"))
+                    .build();
+    
+            DockerHttpClient http = new ApacheDockerHttpClient.Builder()
+                    .dockerHost(cfg.getDockerHost())
+                    .build();
+    
+            dockerClient = DockerClientBuilder.getInstance(cfg).withDockerHttpClient(http).build();
+            dockerClient.pingCmd().exec();   // verifies connection
+    
+            dockerAvailable = true;
+        } catch (Exception ex) {
+            logger.warn("Docker not available: {}", ex.getMessage());
+            dockerAvailable = false;
         }
     }
     
@@ -131,6 +135,50 @@ public class DockerService {
     }
     
     /**
+     * Get Google Cloud authentication configuration for Docker operations
+     * @return AuthConfig with Google Cloud credentials, or null if unable to get credentials
+     */
+    private AuthConfig getGoogleCloudAuthConfig() {
+        try {
+            // Get access token from gcloud
+            ProcessBuilder processBuilder = new ProcessBuilder("gcloud", "auth", "print-access-token");
+            Process process = processBuilder.start();
+            
+            StringBuilder tokenBuilder = new StringBuilder();
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    tokenBuilder.append(line.trim());
+                }
+            }
+            
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                logger.warn("Failed to get Google Cloud access token, exit code: {}", exitCode);
+                return null;
+            }
+            
+            String accessToken = tokenBuilder.toString().trim();
+            if (accessToken.isEmpty()) {
+                logger.warn("Empty access token received from gcloud");
+                return null;
+            }
+            
+            // Create AuthConfig for Google Cloud
+            AuthConfig authConfig = new AuthConfig()
+                    .withUsername("oauth2accesstoken")
+                    .withPassword(accessToken);
+            
+            logger.debug("Successfully created Google Cloud AuthConfig");
+            return authConfig;
+            
+        } catch (Exception e) {
+            logger.warn("Failed to get Google Cloud credentials: {}", e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
      * Push Docker image using Docker Java API
      */
     private boolean pushWithDockerJavaAPI(String imageTag) throws Exception {
@@ -141,6 +189,19 @@ public class DockerService {
         
         PushImageCmd pushCmd = dockerClient.pushImageCmd(imageName).withTag(tag);
         
+        // Add authentication for Google Cloud Artifact Registry
+        if (imageName.contains("pkg.dev") || imageName.contains("gcr.io")) {
+            AuthConfig authConfig = getGoogleCloudAuthConfig();
+            if (authConfig != null) {
+                pushCmd.withAuthConfig(authConfig);
+                logger.debug("Added Google Cloud authentication to Docker push command");
+            }
+        }
+        
+        // Use CountDownLatch to track completion manually
+        CountDownLatch completionLatch = new CountDownLatch(1);
+        AtomicBoolean hasError = new AtomicBoolean(false);
+        
         // Execute the push command with callback
         ResultCallback.Adapter<PushResponseItem> callback = new ResultCallback.Adapter<PushResponseItem>() {
             @Override
@@ -150,21 +211,39 @@ public class DockerService {
                 }
                 if (item.getErrorDetail() != null) {
                     logger.error("Docker push error: {}", item.getErrorDetail().getMessage());
+                    hasError.set(true);
                 }
             }
             
             @Override
             public void onError(Throwable throwable) {
                 logger.error("Docker push failed", throwable);
+                hasError.set(true);
+                completionLatch.countDown(); // Signal completion even on error
             }
             
             @Override
             public void onComplete() {
                 logger.info("Docker push completed");
+                completionLatch.countDown(); // Signal completion
             }
         };
         
-        pushCmd.exec(callback).awaitCompletion();
+        // Start the push operation
+        pushCmd.exec(callback);
+        
+        // Wait for completion with timeout
+        boolean completed = completionLatch.await(10, TimeUnit.MINUTES);
+        
+        if (!completed) {
+            logger.warn("Docker push timed out after 10 minutes for image: {}", imageTag);
+            throw new RuntimeException("Docker push operation timed out");
+        }
+        
+        if (hasError.get()) {
+            throw new RuntimeException("Docker push operation failed with errors");
+        }
+        
         logger.info("Successfully pushed Docker image via API: {}", imageTag);
         return true;
     }

@@ -58,7 +58,7 @@ public class ProjectController {
         }
         
         // Retrieve and log project
-        Project project = projectService.retrieveAndLogProject(request.getProjectId(), userId);
+        com.armikom.zen.model.Project project = projectService.retrieveAndLogProject(request.getProjectId(), userId);
         
         if (project != null) {
             logger.info("Project retrieved and logged successfully: {} for user: {}", 
@@ -89,4 +89,4 @@ public class ProjectController {
         
         return ResponseEntity.ok(new ProjectResponse(isAvailable, message, null));
     }
-} 
+}
