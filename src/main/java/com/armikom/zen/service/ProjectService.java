@@ -15,7 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -46,70 +45,29 @@ public class ProjectService {
     @Value("${spring.datasource.password}")
     private String adminPassword;
 
-    private FirebaseApp firebaseApp;
-    private Firestore firestore;
+    private final FirebaseApp firebaseApp;
+    private final Firestore firestore;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    public ProjectService(
+            FirebaseApp firebaseApp,
+            Firestore firestore,
+            @Value("${spring.datasource.url}") String connectionString,
+            @Value("${spring.datasource.username}") String adminUsername,
+            @Value("${spring.datasource.password}") String adminPassword) {
+        this.firebaseApp = firebaseApp;
+        this.firestore = firestore;
+        this.connectionString = connectionString;
+        this.adminUsername = adminUsername;
+        this.adminPassword = adminPassword;
+    }
     // Patterns for input validation
     private static final Pattern VALID_USERNAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_]{3,64}$");
     private static final Pattern VALID_PASSWORD_PATTERN = Pattern.compile("^[a-zA-Z0-9@#$%^&+=!]{8,128}$");
     private static final Pattern VALID_DB_NAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_]{3,64}$");
 
-    @PostConstruct
-    public void init() {
-        try {
-            initializeFirebase();
-            logger.info("Firebase initialized successfully for project: {}", firebaseProjectId);
-        } catch (IOException e) {
-            logger.error("Failed to initialize Firebase", e);
-        }
-    }
-
-    private void initializeFirebase() throws IOException {
-        if (FirebaseApp.getApps().isEmpty()) {
-            FirebaseOptions.Builder optionsBuilder = FirebaseOptions.builder();
-
-            // Configure credentials
-            if (firebaseCredentialsJson != null && !firebaseCredentialsJson.trim().isEmpty()) {
-                // Use service account JSON from configuration
-                logger.info("Using Firebase credentials from configuration (JSON)");
-                ByteArrayInputStream credentialsStream = new ByteArrayInputStream(
-                    firebaseCredentialsJson.getBytes());
-                GoogleCredentials credentials = GoogleCredentials.fromStream(credentialsStream);
-                optionsBuilder.setCredentials(credentials);
-            } else {
-                // Use default credentials (from gcloud auth, environment, or metadata server)
-                logger.info("Using Firebase Application Default Credentials (gcloud auth or environment)");
-                optionsBuilder.setCredentials(GoogleCredentials.getApplicationDefault());
-            }
-
-            // Set project ID if provided
-            if (firebaseProjectId != null && !firebaseProjectId.trim().isEmpty()) {
-                optionsBuilder.setProjectId(firebaseProjectId);
-                logger.info("Using Firebase project ID: {}", firebaseProjectId);
-            }
-
-            firebaseApp = FirebaseApp.initializeApp(optionsBuilder.build());
-        } else {
-            firebaseApp = FirebaseApp.getInstance();
-        }
-
-        firestore = com.google.firebase.cloud.FirestoreClient.getFirestore(firebaseApp);
-    }
-
     public boolean isFirebaseAvailable() {
         return firebaseApp != null;
-    }
-
-    @PreDestroy
-    public void cleanup() {
-        if (firebaseApp != null) {
-            try {
-                firebaseApp.delete();
-                logger.info("Firebase app cleaned up successfully");
-            } catch (Exception e) {
-                logger.warn("Error cleaning up Firebase app", e);
-            }
-        }
     }
 
     /**

@@ -5,7 +5,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import com.armikom.zen.service.DockerService;
 import com.armikom.zen.service.ProjectService;
@@ -22,11 +21,13 @@ import java.util.HashMap;
 @Tag(name = "Test Controller", description = "Test API endpoints")
 public class TestController {
 
-    @Autowired
-    private DockerService dockerService;
-    
-    @Autowired
-    private ProjectService projectService;
+    private final DockerService dockerService;
+    private final ProjectService projectService;
+
+    public TestController(DockerService dockerService, ProjectService projectService) {
+        this.dockerService = dockerService;
+        this.projectService = projectService;
+    }
 
     @GetMapping("/hello")
     @Operation(summary = "Hello World", description = "Returns a simple hello world message")
@@ -167,4 +168,4 @@ public class TestController {
             return ResponseEntity.ok(response);
         }
     }
-} 
+}

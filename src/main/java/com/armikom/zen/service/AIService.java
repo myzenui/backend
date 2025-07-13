@@ -21,7 +21,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.EnableAsync;
@@ -47,32 +46,30 @@ public class AIService {
     private static final Logger logger = LoggerFactory.getLogger(AIService.class);
     private static final String JOBS_COLLECTION = "jobs";
     
-    @Value("${firebase.credentials.json:}")
-    private String firebaseCredentialsJson;
-    
-    @Value("${firebase.project.id:}")
-    private String firebaseProjectId;
-    
-    @Autowired
-    private ProjectService projectService;
-    
+    private final ProjectService projectService;
     private final ChatClient chatClient;
-    private FirebaseApp firebaseApp;
-    private Firestore firestore;
+    private final FirebaseApp firebaseApp;
+    private final Firestore firestore;
     private ListenerRegistration listenerRegistration;
     private final ObjectMapper objectMapper = new ObjectMapper();
     
     // Track processing jobs to avoid duplicate processing
     private final Map<String, CompletableFuture<Void>> processingJobs = new ConcurrentHashMap<>();
     
-    public AIService(ChatModel chatModel) {
+    public AIService(
+            ProjectService projectService,
+            ChatModel chatModel,
+            FirebaseApp firebaseApp,
+            Firestore firestore) {
+        this.projectService = projectService;
         this.chatClient = ChatClient.builder(chatModel).build();
+        this.firebaseApp = firebaseApp;
+        this.firestore = firestore;
     }
     
     @PostConstruct
     public void init() {
         try {
-            initializeFirebase();
             startJobListener();
             logger.info("AIService initialized successfully and listening for jobs");
         } catch (Exception e) {
@@ -80,35 +77,6 @@ public class AIService {
         }
     }
     
-    private void initializeFirebase() throws IOException {
-        if (FirebaseApp.getApps().isEmpty()) {
-            FirebaseOptions.Builder optionsBuilder = FirebaseOptions.builder();
-            
-            // Configure credentials
-            if (firebaseCredentialsJson != null && !firebaseCredentialsJson.trim().isEmpty()) {
-                logger.info("Using Firebase credentials from configuration (JSON)");
-                ByteArrayInputStream credentialsStream = new ByteArrayInputStream(
-                    firebaseCredentialsJson.getBytes());
-                GoogleCredentials credentials = GoogleCredentials.fromStream(credentialsStream);
-                optionsBuilder.setCredentials(credentials);
-            } else {
-                logger.info("Using Firebase Application Default Credentials");
-                optionsBuilder.setCredentials(GoogleCredentials.getApplicationDefault());
-            }
-            
-            // Set project ID if provided
-            if (firebaseProjectId != null && !firebaseProjectId.trim().isEmpty()) {
-                optionsBuilder.setProjectId(firebaseProjectId);
-                logger.info("Using Firebase project ID: {}", firebaseProjectId);
-            }
-            
-            firebaseApp = FirebaseApp.initializeApp(optionsBuilder.build());
-        } else {
-            firebaseApp = FirebaseApp.getInstance();
-        }
-        
-        firestore = FirestoreClient.getFirestore(firebaseApp);
-    }
     
     private void startJobListener() {
         if (firestore == null) {
