@@ -1,0 +1,127 @@
+### Test Project Service API
+### Base URL
+@baseUrl = http://localhost:8080
+
+### Variables (replace with your actual values)
+@firebaseToken = eyJhbGciOiJSUzI1NiIsImtpZCI6IjQ3YWU0OWM0YzlkM2ViODVhNTI1NDA3MmMzMGQyZThlNzY2MWVmZTEiLCJ0eXAiOiJKV1QifQ.eyJuYW1lIjoiWmVuIEFybWlrb20iLCJwaWN0dXJlIjoiaHR0cHM6Ly9saDMuZ29vZ2xldXNlcmNvbnRlbnQuY29tL2EvQUNnOG9jSWJXakRUajN6eHVPUnFoeEt2MlJQd3RwVU00eUZ3aGx2dlRicUdLTUo3aHBYNz1zOTYtYyIsImlzcyI6Imh0dHBzOi8vc2VjdXJldG9rZW4uZ29vZ2xlLmNvbS96ZW51aS1hMjUwOCIsImF1ZCI6InplbnVpLWEyNTA4IiwiYXV0aF90aW1lIjoxNzUyMjQyNjA1LCJ1c2VyX2lkIjoiak9aanE2bVdWYWhFQ2h1SEJ3emh2dU9ZTUd0MiIsInN1YiI6ImpPWmpxNm1XVmFoRUNodUhCd3podnVPWU1HdDIiLCJpYXQiOjE3NTIyNDI2MDUsImV4cCI6MTc1MjI0NjIwNSwiZW1haWwiOiJ6ZW5AYXJtaWtvbS5jb20iLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwiZmlyZWJhc2UiOnsiaWRlbnRpdGllcyI6eyJnb29nbGUuY29tIjpbIjExMjg3OTcwMDAyODczNDg5MjgzNyJdLCJlbWFpbCI6WyJ6ZW5AYXJtaWtvbS5jb20iXX0sInNpZ25faW5fcHJvdmlkZXIiOiJnb29nbGUuY29tIn19.NIkYznxVixwGD-40V3WdxPpKGlfpxmvJr3z1OGFwLyiQGixP71oFZqThrIdM0NO2Y2DjVknTUyt1O8-P_p-5hFaYNFD1ptlCiryGgUZW_8AbiZhWmp1L1DXmWnxIl63zek-0EGERhEdaq9DyISJ6o-9kWwbeq5yW05h7ZVsXXT4RfmGVn5G78eKpEBcayR8aHPfiDxr2-mpEbbzuBJLd7U_x5uRSOQc7GkuHXLJlH0zcrLoBJK0aRAGQuG7rlShjKOUcJtqQsJA_LtZUvvaFaekVaJ2PaRtLXl_hktjA51WwdnapugzO6SxmjPy-opHtdokVpDwhJIUzis8zpw817Q
+@projectId = hmlpIMXm8luVpcGMrEGL
+
+###
+### 1. Check Firebase Status
+GET {{baseUrl}}/api/projects/firebase/status
+Content-Type: application/json
+
+###
+### 2. Test Project Retrieval (Valid Request)
+POST {{baseUrl}}/api/projects/retrieve
+Content-Type: application/json
+Authorization: Bearer {{firebaseToken}}
+
+{
+  "projectId": "{{projectId}}"
+}
+
+###
+### 3. Test Project Retrieval (Missing Authorization Header)
+POST {{baseUrl}}/api/projects/retrieve
+Content-Type: application/json
+
+{
+  "projectId": "{{projectId}}"
+}
+
+###
+### 4. Test Project Retrieval (Invalid Token)
+POST {{baseUrl}}/api/projects/retrieve
+Content-Type: application/json
+Authorization: Bearer invalid-token-here
+
+{
+  "projectId": "{{projectId}}"
+}
+
+###
+### 5. Test Project Retrieval (Empty Project ID)
+POST {{baseUrl}}/api/projects/retrieve
+Content-Type: application/json
+Authorization: Bearer {{firebaseToken}}
+
+{
+  "projectId": ""
+}
+
+###
+### 6. Test Project Retrieval (Missing Project ID)
+POST {{baseUrl}}/api/projects/retrieve
+Content-Type: application/json
+Authorization: Bearer {{firebaseToken}}
+
+{
+}
+
+###
+### 7. Test Project Retrieval (Different Project ID)
+POST {{baseUrl}}/api/projects/retrieve
+Content-Type: application/json
+Authorization: Bearer {{firebaseToken}}
+
+{
+  "projectId": "another-project-456"
+}
+
+###
+### 8. Test Project Retrieval (Specific Project - Based on User's Example)
+POST {{baseUrl}}/api/projects/retrieve
+Content-Type: application/json
+Authorization: Bearer {{firebaseToken}}
+
+{
+  "projectId": "hmlpIMXm8luVpcGMrEGL"
+}
+
+###
+### 9. Test with Different Base URL (for deployed environment)
+### @baseUrl = https://your-deployed-app.com
+
+### GET {{baseUrl}}/api/projects/firebase/status
+
+###
+### 10. Test Docker Status (existing endpoint for comparison)
+GET {{baseUrl}}/api/test/docker/status
+
+###
+### 11. Test Health Check (existing endpoint for comparison)
+GET {{baseUrl}}/api/test/health
+
+###
+### How to use this file:
+### 1. Install VS Code REST Client extension or use IntelliJ IDEA
+### 2. Replace @firebaseToken with your actual Firebase JWT token
+### 3. Replace @projectId with an actual project ID from your Firestore
+### 4. Click "Send Request" above each ### separator
+### 5. Check the logs in your Spring Boot application to see the project data
+
+###
+### To get a Firebase JWT token for testing:
+### 1. Go to your Firebase Console
+### 2. Create a test user or use Firebase Auth SDK in a frontend app
+### 3. Use the token from the authenticated user
+### 4. Or use Firebase Admin SDK to create custom tokens for testing
+
+###
+### Expected responses:
+### - Firebase Status: {"success": true, "message": "Firebase is available", "projectId": null}
+### - Valid Project: {
+###   "success": true,
+###   "message": "Project retrieved and logged successfully",
+###   "projectId": "your-project-id",
+###   "project": {
+###     "businessModel": "",
+###     "name": "Deneme",
+###     "description": "<p>Açıklama</p>",
+###     "userStories": ["", ""],
+###     "userId": "jOZjq6mWVahEChuHBwzhvuOYMGt2"
+###   }
+### }
+### - Invalid Token: {"success": false, "message": "Invalid or missing authorization token", "projectId": "your-project-id"}
+### - Project Not Found: {"success": false, "message": "Project not found", "projectId": "your-project-id"} 

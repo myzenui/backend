@@ -1,0 +1,29 @@
+### Test Gemini Chat Endpoint
+POST http://localhost:8080/api/gemini/chat
+Content-Type: application/json
+
+{
+    "message": "What is artificial intelligence?"
+}
+
+### Test Gemini Hello Endpoint
+GET http://localhost:8080/api/gemini/hello?message=Explain Spring AI in simple terms
+
+### Test Gemini Hello Endpoint with default message
+GET http://localhost:8080/api/gemini/hello
+
+### Test Gemini Chat with coding question
+POST http://localhost:8080/api/gemini/chat
+Content-Type: application/json
+
+{
+    "message": "Write a simple Java method to calculate the factorial of a number"
+}
+
+### Test Gemini Chat with project-specific question
+POST http://localhost:8080/api/gemini/chat
+Content-Type: application/json
+
+{
+    "message": "What are the benefits of using Firebase with Spring Boot?"
+} 
