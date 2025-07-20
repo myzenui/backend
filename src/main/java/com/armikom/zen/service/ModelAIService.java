@@ -47,7 +47,7 @@ public class ModelAIService {
     private List<Message> loadChatHistoryFromFirestore(String conversationId) {
         logger.info("Loading chat history from Firestore for conversationId: {}", conversationId);
         List<Message> messages = new ArrayList<>();
-        
+
         try {
             QuerySnapshot querySnapshot = firestore
                     .collection("conversations")
@@ -60,7 +60,7 @@ public class ModelAIService {
             for (QueryDocumentSnapshot document : querySnapshot.getDocuments()) {
                 Map<String, Object> data = document.getData();
                 String text = (String) data.get("text");
-                
+
                 if (text == null || text.trim().isEmpty()) {
                     continue; // Skip empty messages
                 }
@@ -76,12 +76,12 @@ public class ModelAIService {
                     }
                 }
             }
-            
+
             logger.info("Loaded {} messages from Firestore for conversationId: {}", messages.size(), conversationId);
         } catch (InterruptedException | ExecutionException e) {
             logger.error("Error loading chat history from Firestore for conversationId: {}", conversationId, e);
         }
-        
+
         return messages;
     }
 
@@ -114,10 +114,10 @@ public class ModelAIService {
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
         String content = chatClient.prompt(
-                        "You are a helpful data model engineer who is responsible to read model, take user request and answer or update model according to user requirements. User is not experienced at software developer so you can suggest better ways if there is. At start please read model.   DocumentId: "
+                        "You are a helpful data model engineer who is responsible to read model, take user request and answer or update model according to user requirements and MUST write the model. User is not experienced at software developer so you can suggest better ways if there is. At start please read model.   DocumentId: "
                                 + documentId)
                 .user(message)
-                .system("You are an expert in PlantUML and software design. Your task is to generate PlantUML class diagrams from project descriptions. Reading and writing model is cheap so don't ask user for confirmation. While modifying model please only use public fields. Use only plantuml class diagram related items. Whenever you modified the model always write it to datastore using tool provided.")
+                .system("You are an expert in PlantUML and software design. Your task is to generate PlantUML class diagrams from project descriptions. Reading and writing model is cheap so don't ask user for confirmation. While modifying model please only use public fields. Use only plantuml class diagram related items. Whenever you modified the model you MUST write it to datastore using tool provided.")
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
                 .content();
