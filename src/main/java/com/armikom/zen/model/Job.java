@@ -17,17 +17,21 @@ public class Job {
     
     @Schema(description = "Status of the job", example = "pending")
     private String status;
+
+    @Schema(description = "Type of the job", example = "generate")
+    private String type;
     
     @Schema(description = "Creation date of the job")
     private LocalDateTime creationDate;
     
     public Job() {}
     
-    public Job(String id, String projectId, String userId, String status, LocalDateTime creationDate) {
+    public Job(String id, String projectId, String userId, String status, String type, LocalDateTime creationDate) {
         this.id = id;
         this.projectId = projectId;
         this.userId = userId;
         this.status = status;
+        this.type = type;
         this.creationDate = creationDate;
     }
     
@@ -62,6 +66,14 @@ public class Job {
     public void setStatus(String status) {
         this.status = status;
     }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
     
     public LocalDateTime getCreationDate() {
         return creationDate;
@@ -78,7 +90,8 @@ public class Job {
                 ", projectId='" + projectId + '\'' +
                 ", userId='" + userId + '\'' +
                 ", status='" + status + '\'' +
+                ", type='" + type + '\'' +
                 ", creationDate=" + creationDate +
                 '}';
     }
-} 
+}

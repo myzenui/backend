@@ -4,7 +4,6 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.firestore.DocumentChange;
 import com.google.cloud.firestore.DocumentReference;
 import com.google.cloud.firestore.DocumentSnapshot;
-import com.google.cloud.firestore.EventListener;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreException;
 import com.google.cloud.firestore.ListenerRegistration;
@@ -25,7 +24,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.stereotype.Service;
-import jakarta.annotation.PostConstruct;
+import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.context.event.EventListener;
 import jakarta.annotation.PreDestroy;
 
 import java.io.ByteArrayInputStream;
@@ -38,6 +38,8 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 @EnableAsync
@@ -50,8 +52,10 @@ public class AIService {
     private final ChatClient chatClient;
     private final FirebaseApp firebaseApp;
     private final Firestore firestore;
-    private ListenerRegistration listenerRegistration;
+    private volatile ListenerRegistration listenerRegistration;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final AtomicBoolean initialized = new AtomicBoolean(false);
+    private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
     
     // Track processing jobs to avoid duplicate processing
     private final Map<String, CompletableFuture<Void>> processingJobs = new ConcurrentHashMap<>();
@@ -67,53 +71,90 @@ public class AIService {
         this.firestore = firestore;
     }
     
-    @PostConstruct
-    public void init() {
-        try {
-            startJobListener();
-            logger.info("AIService initialized successfully and listening for jobs");
-        } catch (Exception e) {
-            logger.error("Failed to initialize AIService", e);
+    @EventListener(ContextRefreshedEvent.class)
+    public void onContextRefreshed() {
+        if (initialized.compareAndSet(false, true)) {
+            try {
+                // Add a small delay to ensure Firestore is fully ready
+                Thread.sleep(1000);
+                startJobListener();
+                logger.info("AIService initialized successfully and listening for jobs");
+            } catch (Exception e) {
+                logger.error("Failed to initialize AIService", e);
+                initialized.set(false);
+            }
         }
     }
     
     
     private void startJobListener() {
+        if (shutdownRequested.get()) {
+            logger.info("Shutdown requested, skipping job listener initialization");
+            return;
+        }
+        
+        // log job listener start
+        logger.info("AI job listener starting..");
         if (firestore == null) {
             logger.error("Cannot start job listener: Firestore not initialized");
             return;
         }
         
-        Query query = firestore.collection(JOBS_COLLECTION).whereEqualTo("status", "queued");
-        
-        listenerRegistration = query.addSnapshotListener(new EventListener<QuerySnapshot>() {
-            @Override
-            public void onEvent(QuerySnapshot snapshots, FirestoreException e) {
-                if (e != null) {
-                    logger.error("Error listening to jobs collection", e);
-                    return;
-                }
-                
-                for (DocumentChange dc : snapshots.getDocumentChanges()) {
-                    switch (dc.getType()) {
-                        case ADDED:
-                            handleNewJob(dc.getDocument());
-                            break;
-                        case MODIFIED:
-                            logger.debug("Modified job: {}", dc.getDocument().getId());
-                            break;
-                        case REMOVED:
-                            logger.debug("Removed job: {}", dc.getDocument().getId());
-                            break;
+        try {
+            Query query = firestore.collection(JOBS_COLLECTION).whereEqualTo("status", "queued");
+            
+            listenerRegistration = query.addSnapshotListener(new com.google.cloud.firestore.EventListener<QuerySnapshot>() {
+                @Override
+                public void onEvent(QuerySnapshot snapshots, FirestoreException e) {
+                    if (shutdownRequested.get()) {
+                        logger.debug("Shutdown requested, ignoring snapshot event");
+                        return;
+                    }
+                    
+                    if (e != null) {
+                        if (e.getCause() instanceof RejectedExecutionException) {
+                            logger.warn("Firestore listener rejected execution - likely shutting down");
+                            return;
+                        }
+                        logger.error("Error listening to jobs collection", e);
+                        return;
+                    }
+                    
+                    for (DocumentChange dc : snapshots.getDocumentChanges()) {
+                        if (shutdownRequested.get()) {
+                            logger.debug("Shutdown requested, stopping job processing");
+                            return;
+                        }
+                        
+                        switch (dc.getType()) {
+                            case ADDED:
+                                handleNewJob(dc.getDocument());
+                                break;
+                            case MODIFIED:
+                                logger.debug("Modified job: {}", dc.getDocument().getId());
+                                break;
+                            case REMOVED:
+                                logger.debug("Removed job: {}", dc.getDocument().getId());
+                                break;
+                        }
                     }
                 }
-            }
-        });
-        
-        logger.info("Started listening to jobs collection");
+            });
+            
+            logger.info("Started listening to jobs collection");
+        } catch (RejectedExecutionException e) {
+            logger.warn("Failed to start job listener due to executor shutdown: {}", e.getMessage());
+        } catch (Exception e) {
+            logger.error("Unexpected error starting job listener", e);
+        }
     }
-    
+
     private void handleNewJob(QueryDocumentSnapshot document) {
+        if (shutdownRequested.get()) {
+            logger.debug("Shutdown requested, skipping job: {}", document.getId());
+            return;
+        }
+        
         try {
             Job job = convertToJob(document);
             if (job != null) {
@@ -142,45 +183,67 @@ public class AIService {
     @Async
     public CompletableFuture<Void> processJobAsync(Job job) {
         return CompletableFuture.runAsync(() -> {
+            if (shutdownRequested.get()) {
+                logger.info("Shutdown requested, skipping job processing: {}", job.getId());
+                return;
+            }
+            
             try {
                 logger.info("Starting AI-powered background task for job: {}", job.getId());
-                
-                // Get project information
-                com.armikom.zen.model.Project project = projectService.retrieveAndLogProject(job.getProjectId(), job.getUserId());
-                if (project == null) {
-                    logger.error("Project not found for job {}: projectId={}, userId={}", 
-                        job.getId(), job.getProjectId(), job.getUserId());
-                    updateJobStatus(job.getId(), "failed", "Project not found");
-                    return;
+
+                if ("generate".equals(job.getType())) {
+                    processGenerateJob(job);
+                } else if ("preview".equals(job.getType())) {
+                    processPreviewJob(job);
+                } else {
+                    logger.warn("Unknown job type: {}", job.getType());
+                    updateJobStatus(job.getId(), "failed", "Unknown job type");
                 }
-                
-                // Build project description from project data
-                String projectDescription = buildProjectDescription(project);
-                logger.info("Generated project description for job {}: {}", job.getId(), projectDescription);
-                
-                // Generate PlantUML diagram using Vertex AI
-                String plantUmlDiagram = generatePlantUmlDiagram(projectDescription);
-                if (plantUmlDiagram == null || plantUmlDiagram.trim().isEmpty()) {
-                    logger.error("Failed to generate PlantUML diagram for job: {}", job.getId());
-                    updateJobStatus(job.getId(), "failed", "Failed to generate PlantUML diagram");
-                    return;
-                }
-                
-                logger.info("Generated PlantUML diagram for job {}: {}", job.getId(), plantUmlDiagram);
-                
-                // Update project with the generated PlantUML business class model
-                updateProjectBusinessModel(job.getProjectId(), plantUmlDiagram);
-                
-                // Update job with the generated PlantUML diagram
-                updateJobWithResult(job.getId(), plantUmlDiagram);
-                
-                logger.info("AI-powered background task completed successfully for job: {}", job.getId());
-                
+
             } catch (Exception e) {
                 logger.error("Error in AI-powered background task for job: {}", job.getId(), e);
                 updateJobStatus(job.getId(), "failed", "Error: " + e.getMessage());
             }
         });
+    }
+
+    private void processGenerateJob(Job job) throws Exception {
+        // Get project information
+        com.armikom.zen.model.Project project = projectService.retrieveAndLogProject(job.getProjectId(), job.getUserId());
+        if (project == null) {
+            logger.error("Project not found for job {}: projectId={}, userId={}",
+                    job.getId(), job.getProjectId(), job.getUserId());
+            updateJobStatus(job.getId(), "failed", "Project not found");
+            return;
+        }
+
+        // Build project description from project data
+        String projectDescription = buildProjectDescription(project);
+        logger.info("Generated project description for job {}: {}", job.getId(), projectDescription);
+
+        // Generate PlantUML diagram using Vertex AI
+        String plantUmlDiagram = generatePlantUmlDiagram(projectDescription);
+        if (plantUmlDiagram == null || plantUmlDiagram.trim().isEmpty()) {
+            logger.error("Failed to generate PlantUML diagram for job: {}", job.getId());
+            updateJobStatus(job.getId(), "failed", "Failed to generate PlantUML diagram");
+            return;
+        }
+
+        logger.info("Generated PlantUML diagram for job {}: {}", job.getId(), plantUmlDiagram);
+
+        // Update project with the generated PlantUML business class model
+        updateProjectBusinessModel(job.getProjectId(), plantUmlDiagram);
+
+        // Update job with the generated PlantUML diagram
+        updateJobWithResult(job.getId(), plantUmlDiagram);
+
+        logger.info("AI-powered background task completed successfully for job: {}", job.getId());
+    }
+
+    private void processPreviewJob(Job job) {
+        // This will be implemented later
+        logger.info("Processing preview job: {}", job.getId());
+        updateJobStatus(job.getId(), "completed", "Preview job processed");
     }
     
     private String buildProjectDescription(Project project) {
@@ -253,6 +316,11 @@ public class AIService {
     }
     
     private void updateProjectBusinessModel(String projectId, String plantUmlDiagram) {
+        if (shutdownRequested.get()) {
+            logger.debug("Shutdown requested, skipping project update: {}", projectId);
+            return;
+        }
+        
         try {
             DocumentReference projectRef = firestore.collection("projects").document(projectId);
             
@@ -264,11 +332,23 @@ public class AIService {
             logger.info("Updated project {} business model with PlantUML diagram", projectId);
             
         } catch (ExecutionException | InterruptedException e) {
-            logger.error("Failed to update project business model for project: {}", projectId, e);
+            if (e.getCause() instanceof IllegalStateException && 
+                e.getCause().getMessage().contains("Firestore client has already been closed")) {
+                logger.warn("Firestore client closed during project update: {}", projectId);
+            } else {
+                logger.error("Failed to update project business model for project: {}", projectId, e);
+            }
+        } catch (Exception e) {
+            logger.error("Unexpected error updating project business model: {}", projectId, e);
         }
     }
     
     private void updateJobWithResult(String jobId, String plantUmlDiagram) {
+        if (shutdownRequested.get()) {
+            logger.debug("Shutdown requested, skipping job update: {}", jobId);
+            return;
+        }
+        
         try {
             DocumentReference jobRef = firestore.collection(JOBS_COLLECTION).document(jobId);
             
@@ -281,7 +361,14 @@ public class AIService {
             logger.info("Updated job {} with PlantUML result", jobId);
             
         } catch (ExecutionException | InterruptedException e) {
-            logger.error("Failed to update job with result for job: {}", jobId, e);
+            if (e.getCause() instanceof IllegalStateException && 
+                e.getCause().getMessage().contains("Firestore client has already been closed")) {
+                logger.warn("Firestore client closed during job update: {}", jobId);
+            } else {
+                logger.error("Failed to update job with result for job: {}", jobId, e);
+            }
+        } catch (Exception e) {
+            logger.error("Unexpected error updating job result: {}", jobId, e);
         }
     }
     
@@ -290,6 +377,11 @@ public class AIService {
     }
     
     private void updateJobStatus(String jobId, String status, String errorMessage) {
+        if (shutdownRequested.get()) {
+            logger.debug("Shutdown requested, skipping job status update: {}", jobId);
+            return;
+        }
+        
         try {
             DocumentReference jobRef = firestore.collection(JOBS_COLLECTION).document(jobId);
             
@@ -305,7 +397,14 @@ public class AIService {
             logger.info("Updated job {} status to: {}", jobId, status);
             
         } catch (ExecutionException | InterruptedException e) {
-            logger.error("Failed to update job status for job: {}", jobId, e);
+            if (e.getCause() instanceof IllegalStateException && 
+                e.getCause().getMessage().contains("Firestore client has already been closed")) {
+                logger.warn("Firestore client closed during job status update: {}", jobId);
+            } else {
+                logger.error("Failed to update job status for job: {}", jobId, e);
+            }
+        } catch (Exception e) {
+            logger.error("Unexpected error updating job status: {}", jobId, e);
         }
     }
     
@@ -318,6 +417,7 @@ public class AIService {
             job.setProjectId((String) data.get("projectId"));
             job.setUserId((String) data.get("userId"));
             job.setStatus((String) data.get("status"));
+            job.setType((String) data.get("type"));
             
             // Handle creation_date field
             Object creationDate = data.get("creation_date");
@@ -341,19 +441,34 @@ public class AIService {
     
     @PreDestroy
     public void cleanup() {
+        shutdownRequested.set(true);
+        logger.info("AIService shutdown requested");
+        
+        // Stop the listener first
         if (listenerRegistration != null) {
-            listenerRegistration.remove();
-            logger.info("Stopped listening to jobs collection");
+            try {
+                listenerRegistration.remove();
+                logger.info("Stopped listening to jobs collection");
+            } catch (Exception e) {
+                logger.warn("Error stopping job listener: {}", e.getMessage());
+            }
         }
         
         // Cancel any ongoing processing
-        for (CompletableFuture<Void> future : processingJobs.values()) {
-            if (!future.isDone()) {
-                future.cancel(true);
+        for (Map.Entry<String, CompletableFuture<Void>> entry : processingJobs.entrySet()) {
+            try {
+                CompletableFuture<Void> future = entry.getValue();
+                if (!future.isDone()) {
+                    future.cancel(true);
+                    logger.debug("Cancelled processing job: {}", entry.getKey());
+                }
+            } catch (Exception e) {
+                logger.warn("Error cancelling job {}: {}", entry.getKey(), e.getMessage());
             }
         }
         processingJobs.clear();
         
+        initialized.set(false);
         logger.info("AIService cleanup completed");
     }
     
@@ -370,6 +485,6 @@ public class AIService {
      * @return true if Firebase is initialized and available
      */
     public boolean isFirebaseAvailable() {
-        return firebaseApp != null && firestore != null;
+        return firebaseApp != null && firestore != null && !shutdownRequested.get();
     }
 }

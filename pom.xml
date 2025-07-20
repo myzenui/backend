@@ -1,203 +1,226 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-	<modelVersion>4.0.0</modelVersion>
-	<parent>
-		<groupId>org.springframework.boot</groupId>
-		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>3.5.3</version>
-		<relativePath/> <!-- lookup parent from repository -->
-	</parent>
-	<groupId>com.armikom.zen</groupId>
-	<artifactId>backend</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
-	<name>Backend</name>
-	<description>Backend project for Zen</description>
-	<url/>
-	<licenses>
-		<license/>
-	</licenses>
-	<developers>
-		<developer/>
-	</developers>
-	<scm>
-		<connection/>
-		<developerConnection/>
-		<tag/>
-		<url/>
-	</scm>
-	<properties>
-		<java.version>17</java.version>
-		<spring-ai.version>1.0.0-SNAPSHOT</spring-ai.version>
-	</properties>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.3</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+    <groupId>com.armikom.zen</groupId>
+    <artifactId>backend</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>Backend</name>
+    <description>Backend project for Zen</description>
+    <url/>
+    <licenses>
+        <license/>
+    </licenses>
+    <developers>
+        <developer/>
+    </developers>
+    <scm>
+        <connection/>
+        <developerConnection/>
+        <tag/>
+        <url/>
+    </scm>
+    <properties>
+        <java.version>17</java.version>
+        <spring-ai.version>1.0.0‑M4</spring-ai.version>
+    </properties>
 
-	<repositories>
-		<repository>
-			<id>spring-snapshots</id>
-			<name>Spring Snapshots</name>
-			<url>https://repo.spring.io/snapshot</url>
-			<releases>
-				<enabled>false</enabled>
-			</releases>
-		</repository>
-		<repository>
-			<name>Central Portal Snapshots</name>
-			<id>central-portal-snapshots</id>
-			<url>https://central.sonatype.com/repository/maven-snapshots/</url>
-			<releases>
-				<enabled>false</enabled>
-			</releases>
-			<snapshots>
-				<enabled>true</enabled>
-			</snapshots>
-		</repository>
-	</repositories>
+    <repositories>
+        <repository>
+            <id>spring-snapshots</id>
+            <name>Spring Snapshots</name>
+            <url>https://repo.spring.io/snapshot</url>
+            <releases>
+                <enabled>false</enabled>
+            </releases>
+        </repository>
+        <repository>
+            <name>Central Portal Snapshots</name>
+            <id>central-portal-snapshots</id>
+            <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+            <releases>
+                <enabled>false</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
 
-	<dependencyManagement>
-		<dependencies>
-			<dependency>
-				<groupId>org.springframework.ai</groupId>
-				<artifactId>spring-ai-bom</artifactId>
-				<version>${spring-ai.version}</version>
-				<type>pom</type>
-				<scope>import</scope>
-			</dependency>
-		</dependencies>
-	</dependencyManagement>
+    <dependencies>
+<!--        <dependency>-->
+<!--            <groupId>org.springframework.ai</groupId>-->
+<!--            <artifactId>spring-ai-bom</artifactId>-->
+<!--            <version></version>-->
+<!--            <type>pom</type>-->
+<!--            <scope>import</scope>-->
+<!--        </dependency>-->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
 
-	<dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
 
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-actuator</artifactId>
-		</dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-devtools</artifactId>
+            <scope>runtime</scope>
+            <optional>true</optional>
+        </dependency>
 
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-web</artifactId>
-		</dependency>
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>2.6.0</version>
+        </dependency>
 
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-devtools</artifactId>
-			<scope>runtime</scope>
-			<optional>true</optional>
-		</dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
 
-		<dependency>
-			<groupId>org.springdoc</groupId>
-			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-			<version>2.6.0</version>
-		</dependency>
+        <dependency>
+            <groupId>com.github.docker-java</groupId>
+            <artifactId>docker-java</artifactId>
+            <version>3.4.0</version>
+        </dependency>
 
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-test</artifactId>
-			<scope>test</scope>
-		</dependency>
+        <dependency>
+            <groupId>com.github.docker-java</groupId>
+            <artifactId>docker-java-transport-httpclient5</artifactId>
+            <version>3.4.0</version>
+        </dependency>
 
-		<dependency>
-			<groupId>com.github.docker-java</groupId>
-			<artifactId>docker-java</artifactId>
-			<version>3.4.0</version>
-		</dependency>
+        <!-- Add explicit junixsocket dependency for better Unix socket support -->
+        <dependency>
+            <groupId>com.kohlschutter.junixsocket</groupId>
+            <artifactId>junixsocket-common</artifactId>
+            <version>2.6.1</version>
+        </dependency>
 
-		<dependency>
-			<groupId>com.github.docker-java</groupId>
-			<artifactId>docker-java-transport-httpclient5</artifactId>
-			<version>3.4.0</version>
-		</dependency>
+        <!-- Firebase Admin SDK for authentication and Firestore -->
+        <dependency>
+            <groupId>com.google.firebase</groupId>
+            <artifactId>firebase-admin</artifactId>
+            <version>9.3.0</version>
+        </dependency>
 
-		<!-- Add explicit junixsocket dependency for better Unix socket support -->
-		<dependency>
-			<groupId>com.kohlschutter.junixsocket</groupId>
-			<artifactId>junixsocket-common</artifactId>
-			<version>2.6.1</version>
-		</dependency>
+        <!-- Validation API for @Valid annotation -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
 
-		<!-- Firebase Admin SDK for authentication and Firestore -->
-		<dependency>
-			<groupId>com.google.firebase</groupId>
-			<artifactId>firebase-admin</artifactId>
-			<version>9.3.0</version>
-		</dependency>
+<!--        &lt;!&ndash; Spring AI Gemini starter &ndash;&gt;-->
+<!--        &lt;!&ndash; https://mvnrepository.com/artifact/org.springframework.ai/spring-ai-starter-model-vertex-ai-gemini &ndash;&gt;-->
+<!--        <dependency>-->
+<!--            <groupId>org.springframework.ai</groupId>-->
+<!--            <artifactId>spring-ai-starter-model-vertex-ai-gemini</artifactId>-->
+<!--            <version>1.0.0</version>-->
+<!--        </dependency>-->
 
-		<!-- Validation API for @Valid annotation -->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-validation</artifactId>
-		</dependency>
+        <!--         https://mvnrepository.com/artifact/org.springframework.ai/spring-ai-starter-model-openai -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+            <version>1.0.0</version>
+        </dependency>
 
-		<!-- Spring AI Gemini starter -->
-		<dependency>
-			<groupId>org.springframework.ai</groupId>
-			<artifactId>spring-ai-starter-model-vertex-ai-gemini</artifactId>
-		</dependency>
+        <!-- Explicit protobuf dependencies to resolve version conflicts -->
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>4.28.2</version>
+        </dependency>
 
-		<!-- Explicit protobuf dependencies to resolve version conflicts -->
-		<dependency>
-			<groupId>com.google.protobuf</groupId>
-			<artifactId>protobuf-java</artifactId>
-			<version>3.25.1</version>
-		</dependency>
+        <!-- Google Cloud Common protos -->
+        <dependency>
+            <groupId>com.google.api.grpc</groupId>
+            <artifactId>proto-google-common-protos</artifactId>
+            <version>2.29.0</version>
+        </dependency>
 
-		<!-- Google Cloud Common protos -->
-		<dependency>
-			<groupId>com.google.api.grpc</groupId>
-			<artifactId>proto-google-common-protos</artifactId>
-			<version>2.29.0</version>
-		</dependency>
+        <!-- Google Cloud Core -->
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-core</artifactId>
+            <version>2.26.0</version>
+        </dependency>
 
-		<!-- Google Cloud Core -->
-		<dependency>
-			<groupId>com.google.cloud</groupId>
-			<artifactId>google-cloud-core</artifactId>
-			<version>2.26.0</version>
-		</dependency>
+        <!-- Google API Extensions (GAX) - required for Google Cloud services -->
+        <dependency>
+            <groupId>com.google.api</groupId>
+            <artifactId>gax</artifactId>
+            <version>2.48.0</version>
+        </dependency>
 
-		<!-- Google API Extensions (GAX) - required for Google Cloud services -->
-		<dependency>
-			<groupId>com.google.api</groupId>
-			<artifactId>gax</artifactId>
-			<version>2.48.0</version>
-		</dependency>
+        <!-- Google API Extensions GRPC -->
+        <dependency>
+            <groupId>com.google.api</groupId>
+            <artifactId>gax-grpc</artifactId>
+            <version>2.48.0</version>
+        </dependency>
 
-		<!-- Google API Extensions GRPC -->
-		<dependency>
-			<groupId>com.google.api</groupId>
-			<artifactId>gax-grpc</artifactId>
-			<version>2.48.0</version>
-		</dependency>
+        <!-- Google API Extensions HTTP/JSON -->
+        <dependency>
+            <groupId>com.google.api</groupId>
+            <artifactId>gax-httpjson</artifactId>
+            <version>2.48.0</version>
+        </dependency>
 
-		<!-- Google API Extensions HTTP/JSON -->
-		<dependency>
-			<groupId>com.google.api</groupId>
-			<artifactId>gax-httpjson</artifactId>
-			<version>2.48.0</version>
-		</dependency>
+        <!-- Google Auth library - explicit version for compatibility -->
+        <dependency>
+            <groupId>com.google.auth</groupId>
+            <artifactId>google-auth-library-credentials</artifactId>
+            <version>1.23.0</version>
+        </dependency>
 
-		<!-- Google Auth library - explicit version for compatibility -->
-		<dependency>
-			<groupId>com.google.auth</groupId>
-			<artifactId>google-auth-library-credentials</artifactId>
-			<version>1.23.0</version>
-		</dependency>
+        <!-- Google Auth library OAuth2 HTTP -->
+        <dependency>
+            <groupId>com.google.auth</groupId>
+            <artifactId>google-auth-library-oauth2-http</artifactId>
+            <version>1.23.0</version>
+        </dependency>
 
-		<!-- Google Auth library OAuth2 HTTP -->
-		<dependency>
-			<groupId>com.google.auth</groupId>
-			<artifactId>google-auth-library-oauth2-http</artifactId>
-			<version>1.23.0</version>
-		</dependency>
-	</dependencies>
+        <!-- Microsoft SQL Server JDBC Driver -->
+        <dependency>
+            <groupId>com.microsoft.sqlserver</groupId>
+            <artifactId>mssql-jdbc</artifactId>
+        </dependency>
 
-	<build>
-		<plugins>
-			<plugin>
-				<groupId>org.springframework.boot</groupId>
-				<artifactId>spring-boot-maven-plugin</artifactId>
-			</plugin>
-		</plugins>
-	</build>
+        <!-- H2 Database for development/testing -->
+        <!-- <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency> -->
+
+        <!-- Spring Boot JPA Starter for database support -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
 
 </project>

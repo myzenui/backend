@@ -10,52 +10,41 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import jakarta.annotation.PreDestroy;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 
 @Configuration
 public class FirebaseConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(FirebaseConfig.class);
+    
+    private volatile Firestore firestoreInstance;
 
-    @Value("${firebase.credentials.json:}")
-    private String firebaseCredentialsJson;
-
-    @Value("${firebase.project.id:}")
+    @Value("${firebase.project.id}")
     private String firebaseProjectId;
 
     @Bean
     public FirebaseApp firebaseApp() throws IOException {
-        if (firebaseCredentialsJson == null || firebaseCredentialsJson.trim().isEmpty()) {
-            logger.warn("Firebase credentials are not configured. Firebase will not be initialized.");
-            return null;
-        }
+        logger.info("Initializing Firebase...");
 
         FirebaseOptions options;
         try {
-            logger.info("Using Firebase credentials from configuration (JSON)");
-            ByteArrayInputStream credentialsStream = new ByteArrayInputStream(firebaseCredentialsJson.getBytes());
-            GoogleCredentials credentials = GoogleCredentials.fromStream(credentialsStream);
-
-            FirebaseOptions.Builder optionsBuilder = FirebaseOptions.builder()
-                    .setCredentials(credentials);
-
-            if (firebaseProjectId != null && !firebaseProjectId.trim().isEmpty()) {
-                optionsBuilder.setProjectId(firebaseProjectId);
-                logger.info("Using Firebase project ID: {}", firebaseProjectId);
-            }
-
-            options = optionsBuilder.build();
+            GoogleCredentials credentials = GoogleCredentials.getApplicationDefault();
+            options = FirebaseOptions.builder()
+                    .setCredentials(credentials)
+                    .setProjectId(firebaseProjectId)
+                    .build();
+            logger.info("Firebase initialized using Application Default Credentials for project: {}", firebaseProjectId);
         } catch (IOException e) {
-            logger.error("Failed to initialize Firebase from credentials", e);
+            logger.error("Could not get Application Default Credentials. Please configure credentials.", e);
             throw e;
         }
 
         FirebaseApp app;
         if (FirebaseApp.getApps().isEmpty()) {
             app = FirebaseApp.initializeApp(options);
-            logger.info("Firebase initialized successfully for project: {}", firebaseProjectId);
+            logger.info("Firebase App initialized: {}", app.getName());
         } else {
             app = FirebaseApp.getInstance();
         }
@@ -67,6 +56,40 @@ public class FirebaseConfig {
         if (firebaseApp == null) {
             return null;
         }
-        return FirestoreClient.getFirestore(firebaseApp);
+        
+        try {
+            firestoreInstance = FirestoreClient.getFirestore(firebaseApp);
+            logger.info("Firestore client initialized successfully");
+            return firestoreInstance;
+        } catch (Exception e) {
+            logger.error("Failed to initialize Firestore client", e);
+            return null;
+        }
+    }
+    
+    @PreDestroy
+    public void cleanup() {
+        logger.info("Firebase configuration cleanup started");
+        
+        if (firestoreInstance != null) {
+            try {
+                firestoreInstance.close();
+                logger.info("Firestore client closed successfully");
+            } catch (Exception e) {
+                logger.warn("Error closing Firestore client: {}", e.getMessage());
+            }
+        }
+        
+        try {
+            // Close all Firebase apps
+            for (FirebaseApp app : FirebaseApp.getApps()) {
+                app.delete();
+                logger.info("Firebase app deleted: {}", app.getName());
+            }
+        } catch (Exception e) {
+            logger.warn("Error deleting Firebase apps: {}", e.getMessage());
+        }
+        
+        logger.info("Firebase configuration cleanup completed");
     }
 }
