@@ -1,9 +1,7 @@
 package com.armikom.zen.service;
 
-import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.firestore.DocumentChange;
 import com.google.cloud.firestore.DocumentReference;
-import com.google.cloud.firestore.DocumentSnapshot;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreException;
 import com.google.cloud.firestore.ListenerRegistration;
@@ -11,16 +9,12 @@ import com.google.cloud.firestore.Query;
 import com.google.cloud.firestore.QueryDocumentSnapshot;
 import com.google.cloud.firestore.QuerySnapshot;
 import com.google.firebase.FirebaseApp;
-import com.google.firebase.FirebaseOptions;
-import com.google.firebase.cloud.FirestoreClient;
 import com.armikom.zen.model.Job;
 import com.armikom.zen.model.Project;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.stereotype.Service;
@@ -28,9 +22,6 @@ import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.EventListener;
 import jakarta.annotation.PreDestroy;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Date;
 import java.util.HashMap;
@@ -49,11 +40,11 @@ public class AIService {
     private static final String JOBS_COLLECTION = "jobs";
     
     private final ProjectService projectService;
+    private final PreviewService previewService;
     private final ChatClient chatClient;
     private final FirebaseApp firebaseApp;
     private final Firestore firestore;
     private volatile ListenerRegistration listenerRegistration;
-    private final ObjectMapper objectMapper = new ObjectMapper();
     private final AtomicBoolean initialized = new AtomicBoolean(false);
     private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
     
@@ -62,10 +53,12 @@ public class AIService {
     
     public AIService(
             ProjectService projectService,
+            PreviewService previewService,
             ChatModel chatModel,
             FirebaseApp firebaseApp,
             Firestore firestore) {
         this.projectService = projectService;
+        this.previewService = previewService;
         this.chatClient = ChatClient.builder(chatModel).build();
         this.firebaseApp = firebaseApp;
         this.firestore = firestore;
@@ -241,9 +234,42 @@ public class AIService {
     }
 
     private void processPreviewJob(Job job) {
-        // This will be implemented later
-        logger.info("Processing preview job: {}", job.getId());
-        updateJobStatus(job.getId(), "completed", "Preview job processed");
+        try {
+            logger.info("Processing preview job: {}", job.getId());
+            
+            // Get project information
+            com.armikom.zen.model.Project project = projectService.retrieveAndLogProject(job.getProjectId(), job.getUserId());
+            if (project == null) {
+                logger.error("Project not found for preview job {}: projectId={}, userId={}",
+                        job.getId(), job.getProjectId(), job.getUserId());
+                updateJobStatus(job.getId(), "failed", "Project not found");
+                return;
+            }
+
+            // Get the business model (PlantUML) from the project
+            String plantUml = project.getBusinessModel();
+            if (plantUml == null || plantUml.trim().isEmpty()) {
+                logger.error("No business model found for preview job {}: projectId={}",
+                        job.getId(), job.getProjectId());
+                updateJobStatus(job.getId(), "failed", "No business model found");
+                return;
+            }
+
+            // Generate preview using PreviewService
+            boolean success = previewService.generatePreview(job.getProjectId(), plantUml);
+            if (success) {
+                String previewLocation = previewService.getPreviewLocation(job.getProjectId());
+                updateJobStatus(job.getId(), "completed", "Preview generated at: " + previewLocation);
+                logger.info("Preview job completed successfully for job: {}", job.getId());
+            } else {
+                updateJobStatus(job.getId(), "failed", "Failed to generate preview");
+                logger.error("Preview job failed for job: {}", job.getId());
+            }
+            
+        } catch (Exception e) {
+            logger.error("Error processing preview job: {}", job.getId(), e);
+            updateJobStatus(job.getId(), "failed", "Error: " + e.getMessage());
+        }
     }
     
     private String buildProjectDescription(Project project) {

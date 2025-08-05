@@ -1,0 +1,42 @@
+### Preview Service Test Endpoints
+
+### Generate Preview for a Project
+POST http://localhost:8080/api/preview/generate/test-project-123
+Authorization: Bearer YOUR_FIREBASE_TOKEN_HERE
+Content-Type: application/json
+
+###
+
+### Get Preview Status
+GET http://localhost:8080/api/preview/status/test-project-123
+Authorization: Bearer YOUR_FIREBASE_TOKEN_HERE
+
+###
+
+### Cleanup Preview
+DELETE http://localhost:8080/api/preview/cleanup/test-project-123
+Authorization: Bearer YOUR_FIREBASE_TOKEN_HERE
+
+###
+
+### Test PlantUML to C# Generation (Direct Service)
+POST http://localhost:8080/api/generator/plantuml-to-csharp
+Content-Type: text/plain
+
+@startuml
+class Customer {
+  + name: String
+  + email: String
+  + id: int
+}
+
+class Order {
+  + orderDate: Date
+  + totalAmount: float
+  + id: int
+}
+
+Customer o-- Order : places >
+@enduml
+
+###

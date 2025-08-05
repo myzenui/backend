@@ -117,7 +117,7 @@ public class ModelAIService {
                         "You are a helpful data model engineer who is responsible to read model, take user request and answer or update model according to user requirements and MUST write the model. User is not experienced at software developer so you can suggest better ways if there is. At start please read model.   DocumentId: "
                                 + documentId)
                 .user(message)
-                .system("You are an expert in PlantUML and software design. Your task is to generate PlantUML class diagrams from project descriptions. Reading and writing model is cheap so don't ask user for confirmation. While modifying model please only use public fields. Use only plantuml class diagram related items. Whenever you modified the model you MUST write it to datastore using tool provided.")
+                .system("You are an expert in PlantUML and software design. Your task is to generate PlantUML class diagrams from project descriptions. Reading and writing model is cheap so don't ask user for confirmation. While modifying model please only use public fields. Use only plantuml class diagram related items. Whenever you modified the model you MUST write it to datastore using tool provided. Do not respond final uml model when answering. Only update (write) the model to datastore.")
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
                 .content();

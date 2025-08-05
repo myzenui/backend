@@ -1,0 +1,6 @@
+POST http://localhost:8080/api/generator/plantuml-to-csharp
+Content-Type: text/plain
+
+class Vehicle {
+  +Name: String
+}
