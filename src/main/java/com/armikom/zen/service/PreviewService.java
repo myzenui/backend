@@ -156,15 +156,16 @@ public class PreviewService {
 
         try {
             Path previewPath = getPreviewPath(projectName);
-            logger.info("Building project with Docker image: {} at path: {}", previewDockerImage, previewPath);
+            logger.info("Building project with Docker image: {} at path: {}", "myzen/devcontainer", previewPath);
 
             // Build the project using Docker
             ProcessBuilder processBuilder = new ProcessBuilder(
                 "docker", "run", "--rm",
                 "-v", previewPath.toString() + ":/workspace",
                 "-w", "/workspace",
+                "--entrypoint", "",
                 previewDockerImage,
-                "dotnet", "build"
+                "dotnet", "build", "Zen.csproj"
             );
 
             processBuilder.redirectErrorStream(true);
