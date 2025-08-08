@@ -1,0 +1,96 @@
+### Cloudflare Service Test Endpoints
+
+### === DNS RECORD MANAGEMENT ===
+
+### 🚀 RECOMMENDED: Create DNS record only (most reliable)
+POST http://localhost:8080/api/cloudflare/create-dns-only
+Content-Type: application/json
+
+{
+  "hostname": "zen-reliable.armikom.com",
+  "port": 8080,
+  "protocol": "http"
+}
+
+### Create a tunnel DNS record (DNS only, no tunnel routing)
+POST http://localhost:8080/api/cloudflare/create-tunnel-dns
+Content-Type: application/json
+
+{
+  "dnsName": "zen-app1.armikom.com",
+  "port": 45001,
+  "protocol": "http"
+}
+
+### Create another tunnel DNS record with HTTPS
+POST http://localhost:8080/api/cloudflare/create-tunnel-dns
+Content-Type: application/json
+
+{
+  "dnsName": "zen-app2.armikom.com", 
+  "port": 45002,
+  "protocol": "https"
+}
+
+### List all DNS records
+GET http://localhost:8080/api/cloudflare/dns-records
+
+### Delete a DNS record (replace {recordId} with actual record ID from list response)
+DELETE http://localhost:8080/api/cloudflare/dns-record/{recordId}
+
+### === TUNNEL ROUTE CONFIGURATION ===
+
+### Get current tunnel configuration
+GET http://localhost:8080/api/cloudflare/tunnel-configuration
+
+### 🐛 DEBUG: Add tunnel route (with enhanced logging and simplified structure)
+POST http://localhost:8080/api/cloudflare/tunnel-route
+Content-Type: application/json
+
+{
+  "hostname": "zen-debug.armikom.com",
+  "port": 45001,
+  "protocol": "http"
+}
+
+### Add a tunnel route with path
+POST http://localhost:8080/api/cloudflare/tunnel-route
+Content-Type: application/json
+
+{
+  "hostname": "zen-api.armikom.com",
+  "port": 8080,
+  "protocol": "http",
+  "path": "/"
+}
+
+### Remove a tunnel route (replace hostname with actual hostname)
+DELETE http://localhost:8080/api/cloudflare/tunnel-route/zen-app1.armikom.com
+
+### === COMPLETE ROUTE MANAGEMENT ===
+
+### Create complete route (DNS + Tunnel routing in one call) - RECOMMENDED
+POST http://localhost:8080/api/cloudflare/complete-route
+Content-Type: application/json
+
+{
+  "hostname": "zen-test2.armikom.com",
+  "port": 8080,
+  "protocol": "http"
+}
+
+### Create complete route with HTTPS and path
+POST http://localhost:8080/api/cloudflare/complete-route
+Content-Type: application/json
+
+{
+  "hostname": "zen-secure.armikom.com",
+  "port": 45005,
+  "protocol": "https",
+  "path": "/secure"
+}
+
+### === TUNNEL INFORMATION ===
+
+### Get tunnel information
+GET http://localhost:8080/api/cloudflare/tunnel-info

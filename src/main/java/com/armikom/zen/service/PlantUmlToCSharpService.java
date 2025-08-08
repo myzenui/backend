@@ -24,6 +24,9 @@ public class PlantUmlToCSharpService {
         for (UmlClass umlClass : umlClasses) {
             generatedClasses.put(umlClass.name + ".cs", generateCSharpClass(umlClass));
         }
+        
+        // Add DbContext with DbSets for all classes from PlantUML
+        generatedClasses.put("ZenContext.cs", generateDbContext(umlClasses));
 
         return generatedClasses;
     }
@@ -34,10 +37,10 @@ public class PlantUmlToCSharpService {
         sb.append("using DevExpress.Persistent.Base;\n");
         sb.append("using System;\n");
         sb.append("using System.Collections.Generic;\n\n");
-        sb.append("namespace Zen.Biz\n");
+        sb.append("namespace Zen.Model\n");
         sb.append("{\n\n");
         sb.append("    [DefaultClassOptions]\n");
-        sb.append("    public class ").append(umlClass.name).append(" : BaseObject\n");
+        sb.append("    public class ").append(umlClass.name).append(" : BaseEntity\n");
         sb.append("    {\n");
 
         boolean hasCollections = umlClass.relationships.stream().anyMatch(r -> r.isCollection);
@@ -175,6 +178,34 @@ public class PlantUmlToCSharpService {
             return s + "es";
         }
         return s + "s";
+    }
+
+    private String generateDbContext(List<UmlClass> umlClasses) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("using Microsoft.EntityFrameworkCore;\n");
+        sb.append("using System;\n");
+        sb.append("using System.Collections.Generic;\n");
+        sb.append("using System.Linq;\n");
+        sb.append("using System.Text;\n");
+        sb.append("using System.Threading.Tasks;\n\n");
+        sb.append("namespace Zen.Model\n");
+        sb.append("{\n");
+        sb.append("    public class ZenContext : DbContext\n");
+        sb.append("    {\n");
+        sb.append("        public ZenContext(DbContextOptions options) : base(options)\n");
+        sb.append("        {\n");
+        sb.append("        }\n\n");
+        
+        // Add DbSets for all classes from PlantUML
+        for (UmlClass umlClass : umlClasses) {
+            sb.append("        public DbSet<").append(umlClass.name).append("> ")
+              .append(pluralize(umlClass.name)).append(" { get; set; }\n");
+        }
+        
+        sb.append("    }\n");
+        sb.append("}\n");
+        
+        return sb.toString();
     }
 
     private static class UmlClass {

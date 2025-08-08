@@ -5,7 +5,6 @@ import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -90,8 +89,21 @@ public class PreviewService {
 
             // Delete existing preview directory if it exists
             if (Files.exists(previewPath)) {
-                FileUtils.deleteDirectory(previewPath.toFile());
-                logger.info("Deleted existing preview directory: {}", previewPath);
+                try {
+                    ProcessBuilder processBuilder = new ProcessBuilder("sudo", "rm", "-rf", previewPath.toString());
+                    Process process = processBuilder.start();
+                    int exitCode = process.waitFor();
+                    
+                    if (exitCode == 0) {
+                        logger.info("Deleted existing preview directory using sudo: {}", previewPath);
+                    } else {
+                        logger.error("Failed to delete preview directory using sudo. Exit code: {}", exitCode);
+                        return false;
+                    }
+                } catch (IOException | InterruptedException e) {
+                    logger.error("Error executing sudo rm command: ", e);
+                    return false;
+                }
             }
 
             // Create the preview directory structure
@@ -99,14 +111,38 @@ public class PreviewService {
             logger.info("Created preview directory: {}", previewPath);
 
             // Create a basic .csproj file for the project
-            createProjectFile(previewPath, projectName);
+            createProjectFile(previewPath);
+            
+                        // Create nuget.config file
+            createNugetConfigFile(previewPath);
+            
+            // Create Model directory first
+            Path modelPath = previewPath.resolve("Model");
+            Files.createDirectories(modelPath);
+            logger.debug("Created Model directory: {}", modelPath);
+            
+            // Create BaseEntity.cs file in Model directory
+            createBaseEntityFile(modelPath);
 
             // Write all generated model files
             for (Map.Entry<String, String> entry : fileList.entrySet()) {
-                File file = new File(previewPath.toFile(), entry.getKey());
-                file.getParentFile().mkdirs();
-                Files.write(file.toPath(), entry.getValue().getBytes());
-                logger.debug("Created preview file: {}", file.getPath());
+                String fileName = entry.getKey();
+                String fileContent = entry.getValue();
+                
+                // Determine the correct path for the file
+                Path targetPath;
+                if (fileName.endsWith(".cs")) {
+                    // Place all C# model classes in the Model subdirectory
+                    targetPath = modelPath.resolve(fileName);
+                } else {
+                    // Place non-C# files (like project files) in the root
+                    targetPath = previewPath.resolve(fileName);
+                }
+                
+                // Ensure parent directories exist
+                targetPath.getParent().toFile().mkdirs();
+                Files.write(targetPath, fileContent.getBytes());
+                logger.debug("Created preview file: {}", targetPath);
             }
 
             logger.info("Successfully created {} preview files for project: {}", fileList.size(), projectName);
@@ -121,26 +157,76 @@ public class PreviewService {
     /**
      * Creates a basic .csproj file for the preview project
      */
-    private void createProjectFile(Path previewPath, String projectName) throws IOException {
+    private void createProjectFile(Path previewPath) throws IOException {
         String csprojContent = """
-                <Project Sdk="Microsoft.NET.Sdk">
-                
-                  <PropertyGroup>
-                    <TargetFramework>net8.0</TargetFramework>
-                    <ImplicitUsings>enable</ImplicitUsings>
-                    <Nullable>enable</Nullable>
-                  </PropertyGroup>
-                
-                  <ItemGroup>
-                    <PackageReference Include="DevExpress.Persistent.Base" Version="23.2.3" />
-                  </ItemGroup>
-                
-                </Project>
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Zen</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DevExpress.ExpressApp" Version="24.2.6" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.11" />
+  </ItemGroup>
+
+</Project>
                 """;
 
-        Path csprojPath = previewPath.resolve(projectName + ".csproj");
+        Path csprojPath = previewPath.resolve("Zen.csproj");
         Files.write(csprojPath, csprojContent.getBytes());
         logger.debug("Created project file: {}", csprojPath);
+    }
+
+    /**
+     * Creates a nuget.config file for the preview project
+     */
+    private void createNugetConfigFile(Path previewPath) throws IOException {
+        String nugetConfigContent = """
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+    <packageSources>
+        <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+        <add key="DevExpress" value="https://nuget.devexpress.com/ob5Z9grQGl2RPcDZ4VHeqxccgnHEYwCAAFMUEhJWs236XLluiw/api/v3/index.json" />
+    </packageSources>
+</configuration>
+                """;
+
+        Path nugetConfigPath = previewPath.resolve("nuget.config");
+        Files.write(nugetConfigPath, nugetConfigContent.getBytes());
+        logger.debug("Created nuget.config file: {}", nugetConfigPath);
+    }
+
+    /**
+     * Creates a BaseEntity.cs file for the preview project
+     */
+    private void createBaseEntityFile(Path modelPath) throws IOException {
+        String baseEntityContent = """
+using DevExpress.ExpressApp;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace Zen.Model
+{
+    public abstract class BaseEntity : IXafEntityObject
+    {
+        public virtual int Id { get; set; }
+        public virtual void OnCreated() { }
+        public virtual void OnSaving() { }
+        public virtual void OnLoaded() { }
+    }
+}
+                """;
+
+        Path baseEntityPath = modelPath.resolve("BaseEntity.cs");
+        Files.write(baseEntityPath, baseEntityContent.getBytes());
+        logger.debug("Created BaseEntity.cs file: {}", baseEntityPath);
     }
 
     /**
@@ -169,6 +255,9 @@ public class PreviewService {
             );
 
             processBuilder.redirectErrorStream(true);
+            // log the command
+            logger.info("Running command: {}", processBuilder.command());
+            logger.info("Preview path: {}", previewPath);
             Process process = processBuilder.start();
 
             // Read and log output in real-time
@@ -186,6 +275,17 @@ public class PreviewService {
                 logger.info("Successfully built project with Docker for: {}", projectName);
             } else {
                 logger.error("Docker build failed with exit code: {} for project: {}", exitCode, projectName);
+            }
+
+            // if success, chown all files in the preview path to the current user
+            if (success) {
+                try {
+                    String currentUser = System.getProperty("user.name");
+                    ProcessBuilder chownProcess = new ProcessBuilder("sudo", "chown", "-R", currentUser + ":" + currentUser, previewPath.toString());
+                    chownProcess.start().waitFor();
+                } catch (Exception chownException) {
+                    logger.warn("Failed to change ownership of preview files: {}", chownException.getMessage());
+                }
             }
 
             return success;
