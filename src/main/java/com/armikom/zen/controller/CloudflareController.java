@@ -233,6 +233,30 @@ public class CloudflareController {
         }
     }
 
+    @GetMapping("/tunnel-routes")
+    @Operation(
+        summary = "List Current Tunnel Routes", 
+        description = "Lists all current tunnel ingress routes in a simple format"
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Tunnel routes retrieved successfully"),
+        @ApiResponse(responseCode = "500", description = "Cloudflare API error or internal server error")
+    })
+    public ResponseEntity<java.util.List<String>> getTunnelRoutes() {
+        
+        try {
+            logger.info("Getting current tunnel routes list");
+            
+            java.util.List<String> routes = cloudflareService.listTunnelRoutes();
+            
+            return ResponseEntity.ok(routes);
+            
+        } catch (Exception e) {
+            logger.error("Unexpected error getting tunnel routes", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(java.util.Collections.emptyList());
+        }
+    }
+
     @PostMapping("/tunnel-route")
     @Operation(
         summary = "Add Tunnel Route (Experimental with Enhanced Logging)", 

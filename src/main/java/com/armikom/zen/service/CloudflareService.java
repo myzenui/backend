@@ -312,26 +312,43 @@ public class CloudflareService {
         try {
             logger.info("Adding tunnel route: {} -> {}://localhost:{}", hostname, protocol, port);
             
-            // Create a simplified tunnel configuration
-            SimpleTunnelConfiguration config = new SimpleTunnelConfiguration();
+            // Get existing configuration first
+            SimpleTunnelConfiguration config = getExistingSimpleTunnelConfiguration();
             
-            // Create the route
+            // Create the new route
             String serviceUrl = protocol + "://localhost:" + port;
             SimpleTunnelConfiguration.SimpleIngressRule newRule = new SimpleTunnelConfiguration.SimpleIngressRule();
             newRule.setHostname(hostname);
             newRule.setService(serviceUrl);
             
-            if (path != null && !path.isEmpty()) {
+            if (path != null && !path.isEmpty() && !"/".equals(path)) {
                 newRule.setPath(path);
             }
             
-            // Add the rule
+            // Remove any existing route for this hostname to avoid duplicates
+            config.getIngress().removeIf(rule -> hostname.equals(rule.getHostname()));
+            
+            // Remove catch-all rule temporarily
+            SimpleTunnelConfiguration.SimpleIngressRule catchAllRule = null;
+            for (int i = config.getIngress().size() - 1; i >= 0; i--) {
+                SimpleTunnelConfiguration.SimpleIngressRule rule = config.getIngress().get(i);
+                if (rule.getHostname() == null && "http_status:404".equals(rule.getService())) {
+                    catchAllRule = config.getIngress().remove(i);
+                    break;
+                }
+            }
+            
+            // Add the new rule
             config.getIngress().add(newRule);
             
-            // Add catch-all rule
-            SimpleTunnelConfiguration.SimpleIngressRule catchAll = new SimpleTunnelConfiguration.SimpleIngressRule();
-            catchAll.setService("http_status:404");
-            config.getIngress().add(catchAll);
+            // Add back catch-all rule (or create new one if it didn't exist)
+            if (catchAllRule == null) {
+                catchAllRule = new SimpleTunnelConfiguration.SimpleIngressRule();
+                catchAllRule.setService("http_status:404");
+            }
+            config.getIngress().add(catchAllRule);
+            
+            logger.info("Tunnel configuration now has {} ingress rules", config.getIngress().size());
             
             // Update configuration using simplified approach
             return updateSimpleTunnelConfiguration(config);
@@ -339,6 +356,82 @@ public class CloudflareService {
         } catch (Exception e) {
             logger.error("Error adding tunnel route", e);
             return new CloudflareResponse(false, "Error adding tunnel route: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Gets existing tunnel configuration and converts it to simplified format
+     */
+    private SimpleTunnelConfiguration getExistingSimpleTunnelConfiguration() {
+        try {
+            logger.info("Getting existing tunnel configuration for merging");
+            
+            String url = "/accounts/" + getAccountId() + "/cfd_tunnel/" + cloudflareConfig.getTunnelId() + "/configurations";
+            
+            CloudflareApiResponse<Object> response = webClient
+                    .get()
+                    .uri(url)
+                    .retrieve()
+                    .bodyToMono(new ParameterizedTypeReference<CloudflareApiResponse<Object>>() {})
+                    .timeout(Duration.ofSeconds(30))
+                    .block();
+
+            if (response != null && Boolean.TRUE.equals(response.getSuccess())) {
+                logger.info("Successfully retrieved existing tunnel configuration");
+                
+                Object result = response.getResult();
+                if (result instanceof java.util.Map) {
+                    @SuppressWarnings("unchecked")
+                    java.util.Map<String, Object> resultMap = (java.util.Map<String, Object>) result;
+                    
+                    SimpleTunnelConfiguration config = new SimpleTunnelConfiguration();
+                    
+                    if (resultMap.containsKey("config")) {
+                        @SuppressWarnings("unchecked")
+                        java.util.Map<String, Object> configMap = (java.util.Map<String, Object>) resultMap.get("config");
+                        
+                        if (configMap.containsKey("ingress")) {
+                            @SuppressWarnings("unchecked")
+                            java.util.List<java.util.Map<String, Object>> ingressList = 
+                                (java.util.List<java.util.Map<String, Object>>) configMap.get("ingress");
+                            
+                            for (java.util.Map<String, Object> ruleMap : ingressList) {
+                                SimpleTunnelConfiguration.SimpleIngressRule rule = new SimpleTunnelConfiguration.SimpleIngressRule();
+                                
+                                if (ruleMap.containsKey("hostname")) {
+                                    rule.setHostname((String) ruleMap.get("hostname"));
+                                }
+                                if (ruleMap.containsKey("service")) {
+                                    rule.setService((String) ruleMap.get("service"));
+                                }
+                                if (ruleMap.containsKey("path")) {
+                                    rule.setPath((String) ruleMap.get("path"));
+                                }
+                                
+                                config.getIngress().add(rule);
+                            }
+                        }
+                    }
+                    
+                    logger.info("Converted existing configuration with {} rules", config.getIngress().size());
+                    return config;
+                } else {
+                    logger.warn("No existing tunnel configuration found, creating new one");
+                    return new SimpleTunnelConfiguration();
+                }
+            } else {
+                logger.warn("Failed to get existing tunnel configuration, creating new one");
+                return new SimpleTunnelConfiguration();
+            }
+            
+        } catch (WebClientResponseException e) {
+            logger.warn("Cloudflare API error getting existing config: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+            logger.warn("Creating new empty configuration");
+            return new SimpleTunnelConfiguration();
+        } catch (Exception e) {
+            logger.warn("Unexpected error getting existing tunnel configuration: {}", e.getMessage());
+            logger.warn("Creating new empty configuration");
+            return new SimpleTunnelConfiguration();
         }
     }
 
@@ -470,6 +563,35 @@ public class CloudflareService {
         } catch (Exception e) {
             logger.error("Error creating complete route", e);
             return new CloudflareResponse(false, "Error creating complete route: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Lists current tunnel routes in a simple format
+     */
+    public java.util.List<String> listTunnelRoutes() {
+        try {
+            SimpleTunnelConfiguration config = getExistingSimpleTunnelConfiguration();
+            java.util.List<String> routes = new java.util.ArrayList<>();
+            
+            for (SimpleTunnelConfiguration.SimpleIngressRule rule : config.getIngress()) {
+                if (rule.getHostname() != null) {
+                    String routeInfo = rule.getHostname() + " -> " + rule.getService();
+                    if (rule.getPath() != null && !rule.getPath().isEmpty()) {
+                        routeInfo += " (path: " + rule.getPath() + ")";
+                    }
+                    routes.add(routeInfo);
+                } else {
+                    routes.add("Catch-all: " + rule.getService());
+                }
+            }
+            
+            logger.info("Found {} tunnel routes", routes.size());
+            return routes;
+            
+        } catch (Exception e) {
+            logger.error("Error listing tunnel routes", e);
+            return java.util.Collections.singletonList("Error retrieving routes: " + e.getMessage());
         }
     }
 

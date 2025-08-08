@@ -40,8 +40,11 @@ DELETE http://localhost:8080/api/cloudflare/dns-record/{recordId}
 
 ### === TUNNEL ROUTE CONFIGURATION ===
 
-### Get current tunnel configuration
+### Get current tunnel configuration (detailed)
 GET http://localhost:8080/api/cloudflare/tunnel-configuration
+
+### 📋 List current tunnel routes (simple format)
+GET http://localhost:8080/api/cloudflare/tunnel-routes
 
 ### 🐛 DEBUG: Add tunnel route (with enhanced logging and simplified structure)
 POST http://localhost:8080/api/cloudflare/tunnel-route
@@ -74,7 +77,7 @@ POST http://localhost:8080/api/cloudflare/complete-route
 Content-Type: application/json
 
 {
-  "hostname": "zen-test2.armikom.com",
+  "hostname": "zen-test5.armikom.com",
   "port": 8080,
   "protocol": "http"
 }
