@@ -114,11 +114,12 @@ public class PreviewService {
             // Configure Cloudflare: myzen-<projectId>.armikom.com -> http://<projectId>:5000
             try {
                 String dnsName = "myzen-" + projectId + ".armikom.com"; // using subdomain style
-                var cfResp = cloudflareService.createCompleteRoute(dnsName, 5000, "http", null, projectId);
+                String containerName = "myzen-" + projectId;            // container hostname on docker network
+                var cfResp = cloudflareService.createCompleteRoute(dnsName, 5000, "http", null, containerName);
                 if (!cfResp.isSuccess()) {
                     logger.warn("Cloudflare route setup reported failure: {}", cfResp.getMessage());
                 } else {
-                    logger.info("Cloudflare route configured for {} -> http://{}:5000", dnsName, projectId);
+                    logger.info("Cloudflare route configured for {} -> http://{}:5000", dnsName, containerName);
                 }
             } catch (Exception e) {
                 logger.warn("Failed to configure Cloudflare route for project {}: {}", projectId, e.getMessage());
@@ -392,7 +393,6 @@ namespace Zen.Model
                     "docker", "build",
                     projectId,
                     "-f", "Dockerfile",
-                    "-t", projectId,
                     "-t", "myzen/" + projectId
             );
             build.directory(parentPath.toFile());
@@ -445,8 +445,8 @@ namespace Zen.Model
      * connected to `myzen` network with required environment variables.
      */
     private void replaceAndRunContainer(String projectId) {
-        String containerName = projectId;
-        String imageTag = projectId; // prefer short tag as in example; we also have myzen/<id>
+        String containerName = "myzen-" + projectId;
+        String imageTag = "myzen/" + projectId;
         String connectionString = String.format(
                 "Server=mysql;Database=%s;User=%s;Password=%s;",
                 projectId, projectId, projectId);
