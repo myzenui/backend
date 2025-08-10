@@ -25,6 +25,9 @@ public class TunnelRouteRequest {
     @Schema(description = "Path to route (optional)", example = "/api")
     private String path;
     
+    @Schema(description = "Host to route to (defaults to localhost)", example = "menu2", defaultValue = "localhost")
+    private String host = "localhost";
+    
     public TunnelRouteRequest() {}
     
     public TunnelRouteRequest(String hostname, Integer port) {
@@ -36,6 +39,14 @@ public class TunnelRouteRequest {
         this.hostname = hostname;
         this.port = port;
         this.protocol = protocol;
+        this.host = "localhost";
+    }
+    
+    public TunnelRouteRequest(String hostname, Integer port, String protocol, String host) {
+        this.hostname = hostname;
+        this.port = port;
+        this.protocol = protocol;
+        this.host = host;
     }
     
     public String getHostname() {
@@ -70,8 +81,16 @@ public class TunnelRouteRequest {
         this.path = path;
     }
     
+    public String getHost() {
+        return host != null ? host : "localhost";
+    }
+    
+    public void setHost(String host) {
+        this.host = host;
+    }
+    
     public String getServiceUrl() {
-        return protocol + "://localhost:" + port;
+        return protocol + "://" + getHost() + ":" + port;
     }
     
     @Override
@@ -81,6 +100,7 @@ public class TunnelRouteRequest {
                 ", port=" + port +
                 ", protocol='" + protocol + '\'' +
                 ", path='" + path + '\'' +
+                ", host='" + host + '\'' +
                 '}';
     }
 }

@@ -1,15 +1,46 @@
 ### Cloudflare Service Test Endpoints
+###
+### 🚀 NEW FEATURE: Custom Host Support
+### All endpoints now support a "host" parameter to route to different services:
+### - "localhost" (default) - Routes to localhost:port
+### - "menu2" - Routes to menu2:port (Docker container)
+### - "api-service" - Routes to api-service:port (microservice)
+### - Any hostname/IP you need
+###
 
 ### === DNS RECORD MANAGEMENT ===
 
-### 🚀 RECOMMENDED: Create DNS record only (most reliable)
+### 🚀 RECOMMENDED: Create DNS record only (most reliable & idempotent)
 POST http://localhost:8080/api/cloudflare/create-dns-only
 Content-Type: application/json
 
 {
-  "hostname": "zen-reliable.armikom.com",
+  "hostname": "zen-test6.armikom.com",
   "port": 8080,
-  "protocol": "http"
+  "protocol": "http",
+  "host": "localhost"
+}
+
+### 🐳 Create DNS record for Docker container service (menu2:5000)
+POST http://localhost:8080/api/cloudflare/create-dns-only
+Content-Type: application/json
+
+{
+  "hostname": "zen-menu2.armikom.com",
+  "port": 5000,
+  "protocol": "http",
+  "host": "menu2"
+}
+
+### 🐳 Create DNS record for another microservice (api-service:3000)
+POST http://localhost:8080/api/cloudflare/create-dns-only
+Content-Type: application/json
+
+{
+  "hostname": "zen-api.armikom.com",
+  "port": 3000,
+  "protocol": "http",
+  "host": "api-service"
 }
 
 ### Create a tunnel DNS record (DNS only, no tunnel routing)
@@ -17,8 +48,8 @@ POST http://localhost:8080/api/cloudflare/create-tunnel-dns
 Content-Type: application/json
 
 {
-  "dnsName": "zen-app1.armikom.com",
-  "port": 45001,
+  "dnsName": "zen-menu.armikom.com",
+  "port": 32768,
   "protocol": "http"
 }
 
@@ -46,14 +77,26 @@ GET http://localhost:8080/api/cloudflare/tunnel-configuration
 ### 📋 List current tunnel routes (simple format)
 GET http://localhost:8080/api/cloudflare/tunnel-routes
 
-### 🐛 DEBUG: Add tunnel route (with enhanced logging and simplified structure)
+### 🐛 DEBUG: Add tunnel route (with enhanced logging, simplified structure & idempotent)
 POST http://localhost:8080/api/cloudflare/tunnel-route
 Content-Type: application/json
 
 {
   "hostname": "zen-debug.armikom.com",
   "port": 45001,
-  "protocol": "http"
+  "protocol": "http",
+  "host": "localhost"
+}
+
+### 🐳 Add tunnel route for Docker container (menu2:5000)
+POST http://localhost:8080/api/cloudflare/tunnel-route
+Content-Type: application/json
+
+{
+  "hostname": "zen-menu2.armikom.com",
+  "port": 5000,
+  "protocol": "http",
+  "host": "menu2"
 }
 
 ### Add a tunnel route with path
@@ -61,10 +104,11 @@ POST http://localhost:8080/api/cloudflare/tunnel-route
 Content-Type: application/json
 
 {
-  "hostname": "zen-api.armikom.com",
-  "port": 8080,
+  "hostname": "zen-menu.armikom.com",
+  "port": 32768,
   "protocol": "http",
-  "path": "/"
+  "path": "/",
+  "host": "localhost"
 }
 
 ### Remove a tunnel route (replace hostname with actual hostname)
@@ -72,14 +116,57 @@ DELETE http://localhost:8080/api/cloudflare/tunnel-route/zen-app1.armikom.com
 
 ### === COMPLETE ROUTE MANAGEMENT ===
 
-### Create complete route (DNS + Tunnel routing in one call) - RECOMMENDED
+### ✨ Create complete route (DNS + Tunnel routing in one call) - RECOMMENDED & IDEMPOTENT
 POST http://localhost:8080/api/cloudflare/complete-route
 Content-Type: application/json
 
 {
   "hostname": "zen-test5.armikom.com",
   "port": 8080,
+  "protocol": "http",
+  "host": "localhost"
+}
+
+### 🐳 Create complete route for Docker container (menu2:5000)
+POST http://localhost:8080/api/cloudflare/complete-route
+Content-Type: application/json
+
+{
+  "hostname": "zen-menu4.armikom.com",
+  "port": 5000,
+  "protocol": "http",
+  "host": "zen-menu4"
+}
+
+### 🔄 Test idempotency - run the same request again to see it handles duplicates
+POST http://localhost:8080/api/cloudflare/complete-route
+Content-Type: application/json
+
+{
+  "hostname": "zen-test5.armikom.com",
+  "port": 8080,
+  "protocol": "http",
+  "host": "localhost"
+}
+
+### 🔄 Test configuration update - same hostname, different port (should update)
+POST http://localhost:8080/api/cloudflare/complete-route
+Content-Type: application/json
+
+{
+  "hostname": "zen-menu3.armikom.com",
+  "port": 57001,
   "protocol": "http"
+}
+
+### 🔄 Test configuration update - same hostname, different protocol (should update)
+POST http://localhost:8080/api/cloudflare/complete-route
+Content-Type: application/json
+
+{
+  "hostname": "zen-test7.armikom.com",
+  "port": 9000,
+  "protocol": "https"
 }
 
 ### Create complete route with HTTPS and path

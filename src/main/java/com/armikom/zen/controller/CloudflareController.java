@@ -53,7 +53,8 @@ public class CloudflareController {
             CloudflareResponse response = cloudflareService.createTunnelDnsRecord(
                 request.getDnsName(), 
                 request.getPort(), 
-                request.getProtocol()
+                request.getProtocol(),
+                request.getHost()
             );
             
             if (response.isSuccess()) {
@@ -91,7 +92,8 @@ public class CloudflareController {
             CloudflareResponse response = cloudflareService.createTunnelDnsRecord(
                 request.getHostname(), 
                 request.getPort(), 
-                request.getProtocol()
+                request.getProtocol(),
+                request.getHost()
             );
             
             if (response.isSuccess()) {
@@ -104,11 +106,12 @@ public class CloudflareController {
                     "2. Add: \n" +
                     "   ingress:\n" +
                     "     - hostname: %s\n" +
-                    "       service: %s://localhost:%d\n" +
+                    "       service: %s://%s:%d\n" +
                     "     - service: http_status:404\n" +
                     "3. Restart tunnel: cloudflared tunnel run %s",
                     request.getHostname(), 
                     request.getProtocol(), 
+                    request.getHost(),
                     request.getPort(),
                     cloudflareService.getTunnelInfo().split("\n")[0].replace("Tunnel ID: ", "")
                 );
@@ -278,7 +281,8 @@ public class CloudflareController {
                 request.getHostname(), 
                 request.getPort(), 
                 request.getProtocol(),
-                request.getPath()
+                request.getPath(),
+                request.getHost()
             );
             
             if (response.isSuccess()) {
@@ -351,7 +355,8 @@ public class CloudflareController {
                 request.getHostname(), 
                 request.getPort(), 
                 request.getProtocol(),
-                request.getPath()
+                request.getPath(),
+                request.getHost()
             );
             
             if (response.isSuccess()) {

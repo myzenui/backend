@@ -33,14 +33,63 @@ public class CloudflareService {
     }
 
     /**
-     * Creates a CNAME DNS record pointing to the tunnel domain
-     * and configures the tunnel to route traffic to the specified local port
+     * Creates a CNAME DNS record pointing to the tunnel domain (idempotent) - backward compatibility
      */
     public CloudflareResponse createTunnelDnsRecord(String dnsName, Integer port, String protocol) {
+        return createTunnelDnsRecord(dnsName, port, protocol, "localhost");
+    }
+
+    /**
+     * Creates a CNAME DNS record pointing to the tunnel domain (idempotent)
+     * If the record already exists with same content, returns success
+     * If the record exists with different content, updates it
+     */
+    public CloudflareResponse createTunnelDnsRecord(String dnsName, Integer port, String protocol, String host) {
         try {
-            logger.info("Creating DNS record for {} pointing to {}://localhost:{}", dnsName, protocol, port);
+            logger.info("Creating DNS record for {} pointing to {}://{}:{} (idempotent)", dnsName, protocol, host != null ? host : "localhost", port);
             
-            // First, create the DNS record
+            // Define the expected content
+            String expectedContent = cloudflareConfig.getTunnelId() + ".cfargotunnel.com";
+            
+            // First check if DNS record already exists
+            CloudflareDnsRecord existingRecord = findExistingDnsRecord(dnsName);
+            if (existingRecord != null) {
+                // Check if the existing record has the correct content
+                if (expectedContent.equals(existingRecord.getContent()) && 
+                    "CNAME".equals(existingRecord.getType()) &&
+                    Boolean.TRUE.equals(existingRecord.getProxied())) {
+                    
+                    logger.info("DNS record for {} already exists with correct configuration, returning success", dnsName);
+                    String targetUrl = protocol + "://" + (host != null ? host : "localhost") + ":" + port;
+                    return new CloudflareResponse(
+                        true,
+                        "DNS record already exists with correct configuration (idempotent operation). Record ID: " + existingRecord.getId(),
+                        dnsName,
+                        existingRecord.getId(),
+                        targetUrl
+                    );
+                } else {
+                    // Record exists but has wrong configuration - update it
+                    logger.info("DNS record for {} exists but has incorrect configuration. Expected: {}, Actual: {}. Updating...", 
+                        dnsName, expectedContent, existingRecord.getContent());
+                    
+                    CloudflareResponse updateResponse = updateDnsRecord(existingRecord.getId(), dnsName, expectedContent);
+                    if (updateResponse.isSuccess()) {
+                        String targetUrl = protocol + "://" + (host != null ? host : "localhost") + ":" + port;
+                        return new CloudflareResponse(
+                            true,
+                            "DNS record updated to correct configuration (idempotent operation). Record ID: " + existingRecord.getId(),
+                            dnsName,
+                            existingRecord.getId(),
+                            targetUrl
+                        );
+                    } else {
+                        return updateResponse;
+                    }
+                }
+            }
+            
+            // Create the DNS record
             CloudflareDnsRecord dnsRecord = new CloudflareDnsRecord();
             dnsRecord.setName(dnsName);
             // Point to the tunnel domain - Cloudflare tunnels typically use format like tunnelid.cfargotunnel.com
@@ -60,11 +109,9 @@ public class CloudflareService {
                     .block();
 
             if (response != null && Boolean.TRUE.equals(response.getSuccess())) {
-                logger.info("Successfully created DNS record with ID: {}", response.getResult().getId());
+                logger.info("Successfully created new DNS record with ID: {}", response.getResult().getId());
                 
-                // Note: The actual tunnel configuration needs to be done via cloudflared CLI or tunnel API
-                // For now, we'll return success assuming the tunnel is managed externally
-                String targetUrl = protocol + "://localhost:" + port;
+                String targetUrl = protocol + "://" + (host != null ? host : "localhost") + ":" + port;
                 
                 return new CloudflareResponse(
                     true,
@@ -87,6 +134,72 @@ public class CloudflareService {
             return new CloudflareResponse(false, "Cloudflare API error: " + e.getMessage());
         } catch (Exception e) {
             logger.error("Unexpected error creating DNS record", e);
+            return new CloudflareResponse(false, "Unexpected error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Finds an existing DNS record by name
+     */
+    private CloudflareDnsRecord findExistingDnsRecord(String dnsName) {
+        try {
+            List<CloudflareDnsRecord> records = listDnsRecords();
+            for (CloudflareDnsRecord record : records) {
+                if (dnsName.equals(record.getName())) {
+                    logger.debug("Found existing DNS record: {} -> {} (Type: {}, Proxied: {})", 
+                        record.getName(), record.getContent(), record.getType(), record.getProxied());
+                    return record;
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            logger.warn("Error checking for existing DNS records: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Updates an existing DNS record with new content
+     */
+    private CloudflareResponse updateDnsRecord(String recordId, String dnsName, String newContent) {
+        try {
+            logger.info("Updating DNS record {} with new content: {}", recordId, newContent);
+            
+            CloudflareDnsRecord updateRecord = new CloudflareDnsRecord();
+            updateRecord.setName(dnsName);
+            updateRecord.setContent(newContent);
+            updateRecord.setType("CNAME");
+            updateRecord.setProxied(true);
+            updateRecord.setTtl(1); // Auto TTL
+            
+            String url = "/zones/" + cloudflareConfig.getZoneId() + "/dns_records/" + recordId;
+            
+            CloudflareApiResponse<CloudflareDnsRecord> response = webClient
+                    .put()
+                    .uri(url)
+                    .body(BodyInserters.fromValue(updateRecord))
+                    .retrieve()
+                    .bodyToMono(new ParameterizedTypeReference<CloudflareApiResponse<CloudflareDnsRecord>>() {})
+                    .timeout(Duration.ofSeconds(30))
+                    .block();
+
+            if (response != null && Boolean.TRUE.equals(response.getSuccess())) {
+                logger.info("Successfully updated DNS record {} to point to {}", recordId, newContent);
+                return new CloudflareResponse(true, "DNS record updated successfully");
+            } else {
+                String errorMessage = "Failed to update DNS record";
+                if (response != null && response.getErrors() != null && !response.getErrors().isEmpty()) {
+                    errorMessage = response.getErrors().get(0).getMessage();
+                }
+                logger.error("Failed to update DNS record: {}", errorMessage);
+                return new CloudflareResponse(false, errorMessage);
+            }
+            
+        } catch (WebClientResponseException e) {
+            logger.error("Cloudflare API error updating DNS record: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+            return new CloudflareResponse(false, "Cloudflare API error: " + e.getMessage());
+        } catch (Exception e) {
+            logger.error("Unexpected error updating DNS record", e);
             return new CloudflareResponse(false, "Unexpected error: " + e.getMessage());
         }
     }
@@ -306,23 +419,55 @@ public class CloudflareService {
     }
 
     /**
-     * Adds a new route to the tunnel configuration using simplified approach
+     * Adds a new route to the tunnel configuration using simplified approach (idempotent) - backward compatibility
      */
     public CloudflareResponse addTunnelRoute(String hostname, Integer port, String protocol, String path) {
+        return addTunnelRoute(hostname, port, protocol, path, "localhost");
+    }
+
+    /**
+     * Adds a new route to the tunnel configuration using simplified approach (idempotent)
+     * If the exact same route already exists, returns success without making changes
+     */
+    public CloudflareResponse addTunnelRoute(String hostname, Integer port, String protocol, String path, String host) {
         try {
-            logger.info("Adding tunnel route: {} -> {}://localhost:{}", hostname, protocol, port);
+            logger.info("Adding tunnel route: {} -> {}://{}:{} (idempotent)", hostname, protocol, host != null ? host : "localhost", port);
             
             // Get existing configuration first
             SimpleTunnelConfiguration config = getExistingSimpleTunnelConfiguration();
             
+            // Create the target service URL
+            String serviceUrl = protocol + "://" + (host != null ? host : "localhost") + ":" + port;
+            String targetPath = (path != null && !path.isEmpty() && !"/".equals(path)) ? path : null;
+            
+            // Check if exact same route already exists
+            SimpleTunnelConfiguration.SimpleIngressRule exactMatchRule = findExistingTunnelRoute(config, hostname, serviceUrl, targetPath);
+            if (exactMatchRule != null) {
+                logger.info("Tunnel route for {} -> {} already exists with exact configuration (idempotent operation)", hostname, serviceUrl);
+                return new CloudflareResponse(true, 
+                    "Tunnel route already exists with exact configuration (idempotent operation). Route: " + hostname + " -> " + serviceUrl);
+            }
+            
+            // Check if hostname exists with different service/path - update it
+            SimpleTunnelConfiguration.SimpleIngressRule existingHostnameRule = findExistingTunnelRouteByHostname(config, hostname);
+            if (existingHostnameRule != null) {
+                logger.info("Hostname {} exists with different configuration. " +
+                    "Current: {} -> {} (path: {}). " +
+                    "Updating to: {} -> {} (path: {})", 
+                    hostname, 
+                    existingHostnameRule.getHostname(), existingHostnameRule.getService(), existingHostnameRule.getPath(),
+                    hostname, serviceUrl, targetPath);
+            } else {
+                logger.info("Adding new tunnel route: {} -> {} (path: {})", hostname, serviceUrl, targetPath);
+            }
+            
             // Create the new route
-            String serviceUrl = protocol + "://localhost:" + port;
             SimpleTunnelConfiguration.SimpleIngressRule newRule = new SimpleTunnelConfiguration.SimpleIngressRule();
             newRule.setHostname(hostname);
             newRule.setService(serviceUrl);
             
-            if (path != null && !path.isEmpty() && !"/".equals(path)) {
-                newRule.setPath(path);
+            if (targetPath != null) {
+                newRule.setPath(targetPath);
             }
             
             // Remove any existing route for this hostname to avoid duplicates
@@ -357,6 +502,46 @@ public class CloudflareService {
             logger.error("Error adding tunnel route", e);
             return new CloudflareResponse(false, "Error adding tunnel route: " + e.getMessage());
         }
+    }
+
+    /**
+     * Finds an existing tunnel route that matches hostname, service, and path
+     */
+    private SimpleTunnelConfiguration.SimpleIngressRule findExistingTunnelRoute(
+            SimpleTunnelConfiguration config, String hostname, String serviceUrl, String path) {
+        
+        for (SimpleTunnelConfiguration.SimpleIngressRule rule : config.getIngress()) {
+            if (hostname.equals(rule.getHostname()) && 
+                serviceUrl.equals(rule.getService())) {
+                
+                // Check path equality (both null or both equal)
+                boolean pathMatches = (path == null && rule.getPath() == null) ||
+                                    (path != null && path.equals(rule.getPath()));
+                
+                if (pathMatches) {
+                    logger.debug("Found exact matching tunnel route: {} -> {} (path: {})", 
+                        hostname, serviceUrl, path);
+                    return rule;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Finds any existing tunnel route for a hostname (regardless of service/path)
+     */
+    private SimpleTunnelConfiguration.SimpleIngressRule findExistingTunnelRouteByHostname(
+            SimpleTunnelConfiguration config, String hostname) {
+        
+        for (SimpleTunnelConfiguration.SimpleIngressRule rule : config.getIngress()) {
+            if (hostname.equals(rule.getHostname())) {
+                logger.debug("Found existing tunnel route for hostname {}: {} -> {} (path: {})", 
+                    hostname, rule.getHostname(), rule.getService(), rule.getPath());
+                return rule;
+            }
+        }
+        return null;
     }
 
     /**
@@ -519,45 +704,84 @@ public class CloudflareService {
     }
 
     /**
-     * Creates DNS record and configures tunnel route in one operation
+     * Creates DNS record and configures tunnel route in one operation (idempotent) - backward compatibility
      */
     public CloudflareResponse createCompleteRoute(String dnsName, Integer port, String protocol, String path) {
+        return createCompleteRoute(dnsName, port, protocol, path, "localhost");
+    }
+
+    /**
+     * Creates DNS record and configures tunnel route in one operation (idempotent)
+     * If both DNS and tunnel route already exist, returns success without changes
+     */
+    public CloudflareResponse createCompleteRoute(String dnsName, Integer port, String protocol, String path, String host) {
         try {
-            logger.info("Creating complete route: {} -> {}://localhost:{}", dnsName, protocol, port);
+            logger.info("Creating complete route: {} -> {}://{}:{} (idempotent)", dnsName, protocol, host != null ? host : "localhost", port);
             
-            // First create DNS record
-            CloudflareResponse dnsResponse = createTunnelDnsRecord(dnsName, port, protocol);
+            boolean dnsAlreadyExisted = false;
+            boolean routeAlreadyExisted = false;
+            
+            // First create DNS record (idempotent)
+            CloudflareResponse dnsResponse = createTunnelDnsRecord(dnsName, port, protocol, host);
             if (!dnsResponse.isSuccess()) {
                 return dnsResponse;
             }
             
-            // Try to configure tunnel route (this is experimental)
-            try {
-                CloudflareResponse routeResponse = addTunnelRoute(dnsName, port, protocol, path);
+            // Check if DNS was already existing (idempotent operation)
+            if (dnsResponse.getMessage() != null && dnsResponse.getMessage().contains("already exists")) {
+                dnsAlreadyExisted = true;
+                logger.info("DNS record for {} already existed", dnsName);
+            }
+            
+                            // Try to configure tunnel route (idempotent)
+                try {
+                    CloudflareResponse routeResponse = addTunnelRoute(dnsName, port, protocol, path, host);
                 if (routeResponse.isSuccess()) {
+                    // Check if route was already existing (idempotent operation)
+                    if (routeResponse.getMessage() != null && routeResponse.getMessage().contains("already exists")) {
+                        routeAlreadyExisted = true;
+                        logger.info("Tunnel route for {} already existed", dnsName);
+                    }
+                    
+                    // Create appropriate message based on what existed
+                    String message;
+                    if (dnsAlreadyExisted && routeAlreadyExisted) {
+                        message = "Complete route already exists (idempotent operation). Both DNS and tunnel route were already configured for " + dnsName;
+                    } else if (dnsAlreadyExisted) {
+                        message = "Complete route created successfully. DNS record already existed, tunnel route was " + 
+                                (routeAlreadyExisted ? "already configured" : "newly created") + " for " + dnsName;
+                    } else if (routeAlreadyExisted) {
+                        message = "Complete route created successfully. DNS record was newly created, tunnel route already existed for " + dnsName;
+                    } else {
+                        message = "Complete route created successfully. " + dnsName + " is now accessible and routed to " + protocol + "://" + (host != null ? host : "localhost") + ":" + port;
+                    }
+                    
                     return new CloudflareResponse(true, 
-                        "Complete route created successfully. " + dnsName + " is now accessible and routed to " + protocol + "://localhost:" + port,
+                        message,
                         dnsName, 
                         dnsResponse.getRecordId(), 
-                        protocol + "://localhost:" + port);
+                        protocol + "://" + (host != null ? host : "localhost") + ":" + port);
                 } else {
-                    logger.warn("DNS record created but tunnel route configuration failed for {}", dnsName);
+                    logger.warn("DNS record {} but tunnel route configuration failed for {}", 
+                        dnsAlreadyExisted ? "already existed" : "created", dnsName);
                     return new CloudflareResponse(true, 
-                        "DNS record created successfully. Tunnel route configuration failed: " + routeResponse.getMessage() + 
-                        ". Please configure tunnel manually using: cloudflared tunnel ingress " + dnsName + " " + protocol + "://localhost:" + port,
+                        "DNS record " + (dnsAlreadyExisted ? "already existed" : "created successfully") + 
+                        ". Tunnel route configuration failed: " + routeResponse.getMessage() + 
+                        ". Please configure tunnel manually using: cloudflared tunnel ingress " + dnsName + " " + protocol + "://" + (host != null ? host : "localhost") + ":" + port,
                         dnsName, 
                         dnsResponse.getRecordId(), 
-                        protocol + "://localhost:" + port);
+                        protocol + "://" + (host != null ? host : "localhost") + ":" + port);
                 }
             } catch (Exception routeException) {
                 logger.warn("Failed to configure tunnel route for {} due to exception: {}", dnsName, routeException.getMessage());
                 return new CloudflareResponse(true, 
-                    "DNS record created successfully. Tunnel route configuration is not supported or failed. " +
-                    "Please configure tunnel manually using: cloudflared tunnel ingress " + dnsName + " " + protocol + "://localhost:" + port + 
+                    "DNS record " + (dnsAlreadyExisted ? "already existed" : "created successfully") + 
+                    ". Tunnel route configuration is not supported or failed. " +
+                    "Please configure tunnel manually using: cloudflared tunnel ingress " + dnsName + " " + protocol + "://" + (host != null ? host : "localhost") + ":" + port + 
                     ". Error: " + routeException.getMessage(),
                     dnsName, 
                     dnsResponse.getRecordId(), 
-                    protocol + "://localhost:" + port);
+                    protocol + "://" + (host != null ? host : "localhost") + ":" + port);
             }
             
         } catch (Exception e) {

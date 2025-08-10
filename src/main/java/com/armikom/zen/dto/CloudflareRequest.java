@@ -22,6 +22,9 @@ public class CloudflareRequest {
     @Schema(description = "Protocol to use", example = "http", allowableValues = {"http", "https"})
     private String protocol = "http";
     
+    @Schema(description = "Host to route to (defaults to localhost)", example = "menu2", defaultValue = "localhost")
+    private String host = "localhost";
+    
     public CloudflareRequest() {}
     
     public CloudflareRequest(String dnsName, Integer port) {
@@ -33,6 +36,14 @@ public class CloudflareRequest {
         this.dnsName = dnsName;
         this.port = port;
         this.protocol = protocol;
+        this.host = "localhost";
+    }
+    
+    public CloudflareRequest(String dnsName, Integer port, String protocol, String host) {
+        this.dnsName = dnsName;
+        this.port = port;
+        this.protocol = protocol;
+        this.host = host;
     }
     
     public String getDnsName() {
@@ -59,12 +70,21 @@ public class CloudflareRequest {
         this.protocol = protocol;
     }
     
+    public String getHost() {
+        return host != null ? host : "localhost";
+    }
+    
+    public void setHost(String host) {
+        this.host = host;
+    }
+    
     @Override
     public String toString() {
         return "CloudflareRequest{" +
                 "dnsName='" + dnsName + '\'' +
                 ", port=" + port +
                 ", protocol='" + protocol + '\'' +
+                ", host='" + host + '\'' +
                 '}';
     }
 }

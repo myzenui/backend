@@ -12,6 +12,9 @@ import java.nio.file.Paths;
 import java.util.Map;
 
 import org.apache.tomcat.util.http.fileupload.FileUtils;
+import com.google.cloud.firestore.DocumentReference;
+import com.google.cloud.firestore.DocumentSnapshot;
+import com.google.cloud.firestore.Firestore;
 
 @Service
 public class PreviewService {
@@ -23,10 +26,21 @@ public class PreviewService {
 
     private final PlantUmlToCSharpService plantUmlToCSharpService;
     private final DockerService dockerService;
+    private final Firestore firestore;
+    private final DatabaseService databaseService;
+    private final CloudflareService cloudflareService;
 
-    public PreviewService(PlantUmlToCSharpService plantUmlToCSharpService, DockerService dockerService) {
+    public PreviewService(
+            PlantUmlToCSharpService plantUmlToCSharpService,
+            DockerService dockerService,
+            Firestore firestore,
+            DatabaseService databaseService,
+            CloudflareService cloudflareService) {
         this.plantUmlToCSharpService = plantUmlToCSharpService;
         this.dockerService = dockerService;
+        this.firestore = firestore;
+        this.databaseService = databaseService;
+        this.cloudflareService = cloudflareService;
     }
 
     /**
@@ -35,9 +49,9 @@ public class PreviewService {
      * @param plantUml The PlantUML diagram to generate from
      * @return true if preview generation and build was successful, false otherwise
      */
-    public boolean generatePreview(String projectName, String plantUml) {
-        if (projectName == null || projectName.trim().isEmpty()) {
-            logger.error("Project name cannot be null or empty");
+    public boolean generatePreview(String firestoreDocumentId, String plantUml) {
+        if (firestoreDocumentId == null || firestoreDocumentId.trim().isEmpty()) {
+            logger.error("Firestore document id cannot be null or empty");
             return false;
         }
 
@@ -47,32 +61,74 @@ public class PreviewService {
         }
 
         try {
-            logger.info("Starting preview generation for project: {}", projectName);
+            // Extract project id from firestore document field `id`
+            String projectId = extractProjectIdFromFirestore(firestoreDocumentId);
+            if (projectId == null || projectId.trim().isEmpty()) {
+                logger.error("Project id not found in Firestore document: {}", firestoreDocumentId);
+                return false;
+            }
+
+            logger.info("Starting preview generation for projectId: {} (doc: {})", projectId, firestoreDocumentId);
 
             // Generate model files from PlantUML
             Map<String, String> generatedFiles = plantUmlToCSharpService.generate(plantUml);
             if (generatedFiles.isEmpty()) {
-                logger.error("No files generated from PlantUML for project: {}", projectName);
+                logger.error("No files generated from PlantUML for project: {}", projectId);
                 return false;
             }
 
             // Create preview folder and write files
-            if (!createPreviewFiles(projectName, generatedFiles)) {
-                logger.error("Failed to create preview files for project: {}", projectName);
+            if (!createPreviewFiles(projectId, generatedFiles)) {
+                logger.error("Failed to create preview files for project: {}", projectId);
                 return false;
             }
 
             // Trigger Docker build
-            if (!buildWithDocker(projectName)) {
-                logger.error("Failed to build project with Docker for project: {}", projectName);
+            if (!buildWithDocker(projectId)) {
+                logger.error("Failed to build project with Docker for project: {}", projectId);
                 return false;
             }
 
-            logger.info("Preview generation completed successfully for project: {}", projectName);
+            // Build docker image for the generated project and tag as myzen/<projectId>
+            if (!buildProjectImage(projectId)) {
+                logger.error("Failed to build docker image for project: {}", projectId);
+                return false;
+            }
+
+            // Create (or ensure) database for the project using projectId for db/user/password
+            try {
+                boolean dbOk = databaseService.createDatabase(projectId, projectId, projectId);
+                if (!dbOk) {
+                    logger.error("Failed to create database for project: {}", projectId);
+                    return false;
+                }
+                logger.info("Database created/ensured for project: {}", projectId);
+            } catch (Exception dbEx) {
+                logger.error("Database creation failed for project: {}", projectId, dbEx);
+                return false;
+            }
+
+            // Replace existing container (if any) and run a new one on `myzen` network
+            replaceAndRunContainer(projectId);
+
+            // Configure Cloudflare: myzen-<projectId>.armikom.com -> http://<projectId>:5000
+            try {
+                String dnsName = "myzen-" + projectId + ".armikom.com"; // using subdomain style
+                var cfResp = cloudflareService.createCompleteRoute(dnsName, 5000, "http", null, projectId);
+                if (!cfResp.isSuccess()) {
+                    logger.warn("Cloudflare route setup reported failure: {}", cfResp.getMessage());
+                } else {
+                    logger.info("Cloudflare route configured for {} -> http://{}:5000", dnsName, projectId);
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to configure Cloudflare route for project {}: {}", projectId, e.getMessage());
+            }
+
+            logger.info("Preview generation completed successfully for project: {}", projectId);
             return true;
 
         } catch (Exception e) {
-            logger.error("Error during preview generation for project: {}", projectName, e);
+            logger.error("Error during preview generation", e);
             return false;
         }
     }
@@ -152,6 +208,27 @@ public class PreviewService {
             logger.error("Error creating preview files for project: {}", projectName, e);
             return false;
         }
+    }
+
+    /**
+     * Extracts the project id value from Firestore project document's `id` field.
+     * Falls back to Firestore document id if the field is absent.
+     */
+    private String extractProjectIdFromFirestore(String firestoreDocumentId) {
+        try {
+            DocumentReference ref = firestore.collection("projects").document(firestoreDocumentId);
+            DocumentSnapshot snap = ref.get().get();
+            if (snap.exists()) {
+                Object value = snap.get("id");
+                if (value != null) {
+                    return String.valueOf(value).trim();
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to read project id from Firestore for doc {}: {}", firestoreDocumentId, e.getMessage());
+        }
+        // Fallback to the provided id
+        return firestoreDocumentId;
     }
 
     /**
@@ -293,6 +370,122 @@ namespace Zen.Model
         } catch (Exception e) {
             logger.error("Error building project with Docker for: {}", projectName, e);
             return false;
+        }
+    }
+
+    /**
+     * Builds a runnable Docker image for the generated preview and tags it as myzen/<projectId>.
+     * If a Dockerfile is not present in the preview directory, will attempt to tag the
+     * configured preview image as a fallback so the container lifecycle continues.
+     */
+    private boolean buildProjectImage(String projectId) {
+        try {
+            Path previewPath = getPreviewPath(projectId);           // .../zen/previews/<projectId>
+            Path parentPath = previewPath.getParent();              // .../zen/previews
+
+            // Ensure Dockerfile exists in parent directory as requested by user
+            ensureParentDockerfile(parentPath);
+
+            // Build from the parent directory, using context=<projectId> and -f Dockerfile
+            // Tags: <projectId> and myzen/<projectId>
+            ProcessBuilder build = new ProcessBuilder(
+                    "docker", "build",
+                    projectId,
+                    "-f", "Dockerfile",
+                    "-t", projectId,
+                    "-t", "myzen/" + projectId
+            );
+            build.directory(parentPath.toFile());
+            build.redirectErrorStream(true);
+            logger.info("Building image from {} with Dockerfile at {}. Tags: {}, {}",
+                    parentPath, parentPath.resolve("Dockerfile"), projectId, "myzen/" + projectId);
+
+            Process process = build.start();
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    logger.info("docker build: {}", line);
+                }
+            }
+            int exit = process.waitFor();
+            if (exit != 0) {
+                logger.error("docker build failed with exit code {}", exit);
+                return false;
+            }
+
+            logger.info("Docker image built successfully: {} and {}", projectId, "myzen/" + projectId);
+            return true;
+        } catch (Exception e) {
+            logger.error("Error building docker image for project {}", projectId, e);
+            return false;
+        }
+    }
+
+    private void ensureParentDockerfile(Path parentPath) throws IOException {
+        Path dockerfilePath = parentPath.resolve("Dockerfile");
+        if (Files.exists(dockerfilePath)) {
+            return;
+        }
+        String dockerfile = """
+        FROM myzen/devcontainer:6
+        WORKDIR /workspace
+        COPY nuget.config .
+        COPY Zen.csproj .
+        RUN dotnet restore
+        COPY . .
+        RUN dotnet publish Zen.csproj -o /app
+        WORKDIR /app
+        """;
+        Files.writeString(dockerfilePath, dockerfile);
+        logger.info("Created Dockerfile at {}", dockerfilePath);
+    }
+
+    /**
+     * Stops and removes any existing container with the given project id name, then runs a new one
+     * connected to `myzen` network with required environment variables.
+     */
+    private void replaceAndRunContainer(String projectId) {
+        String containerName = projectId;
+        String imageTag = projectId; // prefer short tag as in example; we also have myzen/<id>
+        String connectionString = String.format(
+                "Server=mysql;Database=%s;User=%s;Password=%s;",
+                projectId, projectId, projectId);
+
+        // Stop and remove existing container if exists
+        try {
+            new ProcessBuilder("docker", "rm", "-f", containerName)
+                    .redirectErrorStream(true)
+                    .start()
+                    .waitFor();
+            logger.info("Ensured old container {} is removed", containerName);
+        } catch (Exception e) {
+            logger.warn("Failed to remove existing container {}: {}", containerName, e.getMessage());
+        }
+
+        // Run new container
+        try {
+            ProcessBuilder run = new ProcessBuilder(
+                    "docker", "run", "-d",
+                    "--name", containerName,
+                    "--network", "myzen",
+                    "-e", "ConnectionStrings__ConnectionString=" + connectionString,
+                    imageTag
+            );
+            run.redirectErrorStream(true);
+            logger.info("Starting container {} from image {} on network myzen", containerName, imageTag);
+            Process proc = run.start();
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(proc.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    logger.info("docker run: {}", line);
+                }
+            }
+            int exit = proc.waitFor();
+            if (exit != 0) {
+                logger.error("docker run failed with exit code {} for container {}", exit, containerName);
+            }
+        } catch (Exception e) {
+            logger.error("Failed to run container for project {}", projectId, e);
         }
     }
 

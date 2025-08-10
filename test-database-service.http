@@ -1,0 +1,416 @@
+### Database Service API Testing
+### This file contains HTTP requests to test all DatabaseService endpoints
+### Make sure your Spring Boot application is running on localhost:8080
+
+### Variables
+@baseUrl = http://localhost:8080/api/database
+@testDbName = testdb_demo
+@testUsername = testuser
+@testPassword = testpass123!
+@backupPath = /tmp/backup_testdb.sql
+
+###
+
+### 1. Test Database Connection
+GET {{baseUrl}}/test-connection
+Accept: application/json
+
+###
+
+### 2. Create a new database with admin user
+POST {{baseUrl}}/create
+Content-Type: application/json
+
+{
+  "databaseName": "{{testDbName}}",
+  "username": "{{testUsername}}",
+  "password": "{{testPassword}}"
+}
+
+###
+
+### 3. Create another test database for demonstration
+POST {{baseUrl}}/create
+Content-Type: application/json
+
+{
+  "databaseName": "demo_project",
+  "username": "demouser",
+  "password": "demopass123!"
+}
+
+###
+
+### 4. Test with invalid database name (should fail with validation error)
+POST {{baseUrl}}/create
+Content-Type: application/json
+
+{
+  "databaseName": "invalid-db-name",
+  "username": "testuser",
+  "password": "testpass123!"
+}
+
+###
+
+### 5. Test with invalid username (should fail with validation error)
+POST {{baseUrl}}/create
+Content-Type: application/json
+
+{
+  "databaseName": "validdb",
+  "username": "invalid-user",
+  "password": "testpass123!"
+}
+
+###
+
+### 6. Test with invalid password (should fail with validation error)
+POST {{baseUrl}}/create
+Content-Type: application/json
+
+{
+  "databaseName": "validdb",
+  "username": "validuser",
+  "password": "short"
+}
+
+###
+
+### 7. Trim all tables in the test database
+POST {{baseUrl}}/trim-tables
+Content-Type: application/json
+
+{
+  "databaseName": "{{testDbName}}"
+}
+
+###
+
+### 7.5. Drop all tables from the test database (WARNING: This completely removes tables)
+POST {{baseUrl}}/drop-tables
+Content-Type: application/json
+
+{
+  "databaseName": "{{testDbName}}"
+}
+
+###
+
+### 8. Create a backup of the test database
+POST {{baseUrl}}/backup
+Content-Type: application/json
+
+{
+  "databaseName": "{{testDbName}}",
+  "backupFilePath": "{{backupPath}}"
+}
+
+###
+
+### 9. Create backup with custom path
+POST {{baseUrl}}/backup
+Content-Type: application/json
+
+{
+  "databaseName": "demo_project",
+  "backupFilePath": "/tmp/demo_project_backup.sql"
+}
+
+###
+
+### 10. Restore database from backup
+POST {{baseUrl}}/restore
+Content-Type: application/json
+
+{
+  "databaseName": "{{testDbName}}",
+  "backupFilePath": "{{backupPath}}"
+}
+
+###
+
+### 11. Change user password
+POST {{baseUrl}}/change-password
+Content-Type: application/json
+
+{
+  "databaseName": "{{testDbName}}",
+  "username": "{{testUsername}}",
+  "newPassword": "newpass456!"
+}
+
+###
+
+### 12. Change password back to original
+POST {{baseUrl}}/change-password
+Content-Type: application/json
+
+{
+  "databaseName": "{{testDbName}}",
+  "username": "{{testUsername}}",
+  "newPassword": "{{testPassword}}"
+}
+
+###
+
+### 13. Test trim tables with invalid database name
+POST {{baseUrl}}/trim-tables
+Content-Type: application/json
+
+{
+  "databaseName": "nonexistent_db"
+}
+
+###
+
+### 13.5. Test drop tables with invalid database name
+POST {{baseUrl}}/drop-tables
+Content-Type: application/json
+
+{
+  "databaseName": "nonexistent_db"
+}
+
+###
+
+### 13.6. Test drop tables with empty database name (validation error)
+POST {{baseUrl}}/drop-tables
+Content-Type: application/json
+
+{
+  "databaseName": ""
+}
+
+###
+
+### 14. Test backup with invalid file path
+POST {{baseUrl}}/backup
+Content-Type: application/json
+
+{
+  "databaseName": "{{testDbName}}",
+  "backupFilePath": "/invalid/path/backup.sql"
+}
+
+###
+
+### 15. Test restore with non-existent backup file
+POST {{baseUrl}}/restore
+Content-Type: application/json
+
+{
+  "databaseName": "{{testDbName}}",
+  "backupFilePath": "/tmp/nonexistent_backup.sql"
+}
+
+###
+
+### 16. Test change password with invalid username
+POST {{baseUrl}}/change-password
+Content-Type: application/json
+
+{
+  "databaseName": "{{testDbName}}",
+  "username": "nonexistent_user",
+  "newPassword": "newpass123!"
+}
+
+###
+
+### Advanced Test Scenarios
+### These tests demonstrate more complex scenarios
+
+### 17. Create database for a project scenario
+POST {{baseUrl}}/create
+Content-Type: application/json
+
+{
+  "databaseName": "ecommerce_app",
+  "username": "ecommerceadmin",
+  "password": "SecurePass123!"
+}
+
+###
+
+### 18. Create development environment database
+POST {{baseUrl}}/create
+Content-Type: application/json
+
+{
+  "databaseName": "myapp_dev",
+  "username": "devuser",
+  "password": "DevPass456!"
+}
+
+###
+
+### 19. Create staging environment database
+POST {{baseUrl}}/create
+Content-Type: application/json
+
+{
+  "databaseName": "myapp_staging",
+  "username": "staginguser",
+  "password": "StagePass789!"
+}
+
+###
+
+### 20. Backup development database
+POST {{baseUrl}}/backup
+Content-Type: application/json
+
+{
+  "databaseName": "myapp_dev",
+  "backupFilePath": "/tmp/myapp_dev_backup.sql"
+}
+
+###
+
+### 20.5. Drop all tables from staging database for clean slate
+POST {{baseUrl}}/drop-tables
+Content-Type: application/json
+
+{
+  "databaseName": "myapp_staging"
+}
+
+###
+
+### 20.6. Trim tables in ecommerce app (keep structure, remove data)
+POST {{baseUrl}}/trim-tables
+Content-Type: application/json
+
+{
+  "databaseName": "ecommerce_app"
+}
+
+###
+
+### 21. Test connection (final verification)
+GET {{baseUrl}}/test-connection
+Accept: application/json
+
+###
+
+### Additional JSON Examples
+### All endpoints now use JSON format with proper validation
+
+### Example: Create database with comprehensive data
+POST {{baseUrl}}/create
+Content-Type: application/json
+
+{
+  "databaseName": "json_test_db",
+  "username": "jsonuser",
+  "password": "JsonPass123!"
+}
+
+###
+
+### Testing Notes:
+### 1. Make sure MySQL is running and accessible
+### 2. Ensure the admin credentials in application.properties are correct
+### 3. The /tmp directory should be writable for backup operations
+### 4. Some operations may take time depending on database size
+### 5. Always test connection first to verify setup
+### 6. For Windows, change backup paths from /tmp/ to C:\temp\ or similar
+### 7. All endpoints now use JSON format with proper validation
+### 8. Request validation will return detailed error messages for invalid data
+### 9. Responses include timestamps and structured error information
+### 10. TRIM TABLES vs DROP TABLES:
+###     - trim-tables: Removes all data but keeps table structure (TRUNCATE)
+###     - drop-tables: Completely removes tables and their structure (DROP)
+### 11. Use drop-tables with extreme caution as it's irreversible
+### 12. Always backup before using drop-tables in production
+
+### Security Testing
+### These requests test the validation and security features
+
+### 22. Test SQL injection attempt in database name
+POST {{baseUrl}}/create
+Content-Type: application/json
+
+{
+  "databaseName": "test'; DROP TABLE users; --",
+  "username": "testuser",
+  "password": "testpass123!"
+}
+
+###
+
+### 23. Test XSS attempt in username
+POST {{baseUrl}}/create
+Content-Type: application/json
+
+{
+  "databaseName": "validdb",
+  "username": "<script>alert('xss')</script>",
+  "password": "testpass123!"
+}
+
+###
+
+### 24. Test very long inputs (should be rejected)
+POST {{baseUrl}}/create
+Content-Type: application/json
+
+{
+  "databaseName": "this_is_a_very_long_database_name_that_exceeds_the_maximum_allowed_length_and_should_be_rejected",
+  "username": "testuser",
+  "password": "testpass123!"
+}
+
+###
+
+### 25. Test empty parameters
+POST {{baseUrl}}/create
+Content-Type: application/json
+
+{
+  "databaseName": "",
+  "username": "",
+  "password": ""
+}
+
+###
+
+### 26. Test SQL injection in drop tables endpoint
+POST {{baseUrl}}/drop-tables
+Content-Type: application/json
+
+{
+  "databaseName": "testdb'; DROP DATABASE mysql; --"
+}
+
+###
+
+### 27. Test malicious database name for drop tables
+POST {{baseUrl}}/drop-tables
+Content-Type: application/json
+
+{
+  "databaseName": "../../../etc/passwd"
+}
+
+###
+
+### Cleanup Operations (Optional)
+### Uncomment these if you want to clean up test databases
+### WARNING: These will permanently delete databases
+
+### Delete test databases (manual SQL - not implemented in service)
+### You would need to connect to MySQL directly and run:
+### DROP DATABASE IF EXISTS testdb_demo;
+### DROP DATABASE IF EXISTS demo_project;
+### DROP DATABASE IF EXISTS ecommerce_app;
+### DROP DATABASE IF EXISTS myapp_dev;
+### DROP DATABASE IF EXISTS myapp_staging;
+### DROP USER IF EXISTS 'testuser'@'%';
+### DROP USER IF EXISTS 'demouser'@'%';
+### DROP USER IF EXISTS 'ecommerceadmin'@'%';
+### DROP USER IF EXISTS 'devuser'@'%';
+### DROP USER IF EXISTS 'staginguser'@'%';
+
+###
