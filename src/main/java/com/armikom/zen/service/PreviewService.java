@@ -5,13 +5,17 @@ import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.tomcat.util.http.fileupload.FileUtils;
+
+import com.armikom.zen.enums.DatabaseEnvironment;
 import com.google.cloud.firestore.DocumentReference;
 import com.google.cloud.firestore.DocumentSnapshot;
 import com.google.cloud.firestore.Firestore;
@@ -29,18 +33,21 @@ public class PreviewService {
     private final Firestore firestore;
     private final DatabaseService databaseService;
     private final CloudflareService cloudflareService;
+    private final GitHubService gitHubService;
 
     public PreviewService(
             PlantUmlToCSharpService plantUmlToCSharpService,
             DockerService dockerService,
             Firestore firestore,
             DatabaseService databaseService,
-            CloudflareService cloudflareService) {
+            CloudflareService cloudflareService,
+            GitHubService gitHubService) {
         this.plantUmlToCSharpService = plantUmlToCSharpService;
         this.dockerService = dockerService;
         this.firestore = firestore;
         this.databaseService = databaseService;
         this.cloudflareService = cloudflareService;
+        this.gitHubService = gitHubService;
     }
 
     /**
@@ -70,6 +77,9 @@ public class PreviewService {
 
             logger.info("Starting preview generation for projectId: {} (doc: {})", projectId, firestoreDocumentId);
 
+            // Try to checkout project from GitHub if it exists
+            boolean projectCheckedOut = checkoutProjectFromGitHub(projectId);
+            
             // Generate model files from PlantUML
             Map<String, String> generatedFiles = plantUmlToCSharpService.generate(plantUml);
             if (generatedFiles.isEmpty()) {
@@ -78,7 +88,7 @@ public class PreviewService {
             }
 
             // Create preview folder and write files
-            if (!createPreviewFiles(projectId, generatedFiles)) {
+            if (!createPreviewFiles(projectId, generatedFiles, projectCheckedOut)) {
                 logger.error("Failed to create preview files for project: {}", projectId);
                 return false;
             }
@@ -95,9 +105,14 @@ public class PreviewService {
                 return false;
             }
 
+            // If model has been changed and preview docker builds succeeded, commit and push changes
+            if (projectCheckedOut) {
+                commitAndPushChanges(projectId, firestoreDocumentId);
+            }
+
             // Create (or ensure) database for the project using projectId for db/user/password
             try {
-                boolean dbOk = databaseService.createDatabase(projectId, projectId, projectId);
+                boolean dbOk = databaseService.createDatabase(DatabaseEnvironment.PREVIEW,projectId, projectId, generatePassword(projectId));
                 if (!dbOk) {
                     logger.error("Failed to create database for project: {}", projectId);
                     return false;
@@ -134,18 +149,23 @@ public class PreviewService {
         }
     }
 
+    private String generatePassword(String projectId) {
+        return "MyZen25!"+projectId;
+    }
+
     /**
      * Creates preview files in a local folder
      * @param projectName The project name
      * @param fileList Map of filename to file content
+     * @param projectCheckedOut Whether the project was checked out from GitHub
      * @return true if successful, false otherwise
      */
-    private boolean createPreviewFiles(String projectName, Map<String, String> fileList) {
+    private boolean createPreviewFiles(String projectName, Map<String, String> fileList, boolean projectCheckedOut) {
         try {
             Path previewPath = getPreviewPath(projectName);
 
-            // Delete existing preview directory if it exists
-            if (Files.exists(previewPath)) {
+            // Only delete existing preview directory if project was not checked out from GitHub
+            if (!projectCheckedOut && Files.exists(previewPath)) {
                 try {
                     ProcessBuilder processBuilder = new ProcessBuilder("sudo", "rm", "-rf", previewPath.toString());
                     Process process = processBuilder.start();
@@ -163,23 +183,28 @@ public class PreviewService {
                 }
             }
 
-            // Create the preview directory structure
-            Files.createDirectories(previewPath);
-            logger.info("Created preview directory: {}", previewPath);
+            // Create the preview directory structure if it doesn't exist
+            if (!Files.exists(previewPath)) {
+                Files.createDirectories(previewPath);
+                logger.info("Created preview directory: {}", previewPath);
+            }
 
-            // Create a basic .csproj file for the project
-            createProjectFile(previewPath);
-            
-                        // Create nuget.config file
-            createNugetConfigFile(previewPath);
+            // Create basic project files only if project was not checked out from GitHub
+            if (!projectCheckedOut) {
+                createProjectFile(previewPath);
+                createNugetConfigFile(previewPath);
+            }
             
             // Create Model directory first
             Path modelPath = previewPath.resolve("Model");
             Files.createDirectories(modelPath);
             logger.debug("Created Model directory: {}", modelPath);
             
-            // Create BaseEntity.cs file in Model directory
-            createBaseEntityFile(modelPath);
+            // Create BaseEntity.cs file in Model directory only if it doesn't exist
+            Path baseEntityPath = modelPath.resolve("BaseEntity.cs");
+            if (!Files.exists(baseEntityPath)) {
+                createBaseEntityFile(modelPath);
+            }
 
             // Write all generated model files
             for (Map.Entry<String, String> entry : fileList.entrySet()) {
@@ -449,7 +474,7 @@ namespace Zen.Model
         String imageTag = "myzen/" + projectId;
         String connectionString = String.format(
                 "Server=mysql;Database=%s;User=%s;Password=%s;",
-                projectId, projectId, projectId);
+                projectId, projectId, generatePassword(projectId));
 
         // Stop and remove existing container if exists
         try {
@@ -527,5 +552,73 @@ namespace Zen.Model
      */
     public String getPreviewLocation(String projectName) {
         return getPreviewPath(projectName).toString();
+    }
+
+    /**
+     * Attempts to checkout a project from GitHub if it exists
+     * @param projectId The project identifier
+     * @return true if project was successfully checked out, false otherwise
+     */
+    private boolean checkoutProjectFromGitHub(String projectId) {
+        try {
+            gitHubService.createRepository(projectId);
+            logger.info("Successfully checked out project from GitHub: {}", projectId);
+            return true;
+        } catch (Exception e) {
+            logger.info("Project {} does not exist on GitHub or failed to checkout: {}", projectId, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Commits and pushes changes to GitHub repository
+     * @param projectId The project identifier
+     * @param firestoreDocumentId The Firestore document ID for context
+     */
+    private void commitAndPushChanges(String projectId, String firestoreDocumentId) {
+        try {
+            Path previewPath = getPreviewPath(projectId);
+            
+            // Collect all model files for merging
+            Map<String, String> modelFiles = new HashMap<>();
+            Path modelPath = previewPath.resolve("Model");
+            
+            if (Files.exists(modelPath)) {
+                Files.walk(modelPath)
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.toString().endsWith(".cs"))
+                    .forEach(path -> {
+                        try {
+                            String relativePath = previewPath.relativize(path).toString();
+                            String content = Files.readString(path);
+                            modelFiles.put(relativePath, content);
+                        } catch (IOException e) {
+                            logger.warn("Failed to read file for commit: {}", path, e);
+                        }
+                    });
+            }
+            
+            // Include project files if they exist
+            Path csprojPath = previewPath.resolve("Zen.csproj");
+            if (Files.exists(csprojPath)) {
+                modelFiles.put("Zen.csproj", Files.readString(csprojPath));
+            }
+            
+            Path nugetConfigPath = previewPath.resolve("nuget.config");
+            if (Files.exists(nugetConfigPath)) {
+                modelFiles.put("nuget.config", Files.readString(nugetConfigPath));
+            }
+            
+            // Merge files and push changes
+            gitHubService.mergeFiles(projectId, modelFiles);
+            String commitMessage = "Commit for preview at " + firestoreDocumentId;
+            gitHubService.pushChanges(projectId, commitMessage);
+            
+            logger.info("Successfully committed and pushed changes for project: {} (preview for doc: {})", 
+                       projectId, firestoreDocumentId);
+            
+        } catch (Exception e) {
+            logger.error("Failed to commit and push changes for project: {}", projectId, e);
+        }
     }
 }

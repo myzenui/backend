@@ -1,6 +1,7 @@
 package com.armikom.zen.controller;
 
 import com.armikom.zen.dto.*;
+import com.armikom.zen.enums.DatabaseEnvironment;
 import com.armikom.zen.service.DatabaseService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -49,6 +50,7 @@ public class DatabaseController {
         
         try {
             boolean success = databaseService.createDatabase(
+                    request.getEnvironment(),
                     request.getDatabaseName(), 
                     request.getUsername(), 
                     request.getPassword());
@@ -96,7 +98,7 @@ public class DatabaseController {
         }
         
         try {
-            boolean success = databaseService.trimAllTables(request.getDatabaseName());
+            boolean success = databaseService.trimAllTables(request.getEnvironment(), request.getDatabaseName());
             
             if (success) {
                 DatabaseOperationResponse response = DatabaseOperationResponse
@@ -139,7 +141,7 @@ public class DatabaseController {
         }
         
         try {
-            boolean success = databaseService.dropAllTables(request.getDatabaseName());
+            boolean success = databaseService.dropAllTables(request.getEnvironment(), request.getDatabaseName());
             
             if (success) {
                 DatabaseOperationResponse response = DatabaseOperationResponse
@@ -183,6 +185,7 @@ public class DatabaseController {
         
         try {
             boolean success = databaseService.createBackup(
+                    request.getEnvironment(),
                     request.getDatabaseName(), 
                     request.getBackupFilePath());
             
@@ -230,6 +233,7 @@ public class DatabaseController {
         
         try {
             boolean success = databaseService.restoreDatabase(
+                    request.getEnvironment(),
                     request.getDatabaseName(), 
                     request.getBackupFilePath());
             
@@ -277,6 +281,7 @@ public class DatabaseController {
         
         try {
             boolean success = databaseService.changeUserPassword(
+                    request.getEnvironment(),
                     request.getDatabaseName(), 
                     request.getUsername(), 
                     request.getNewPassword());
@@ -310,10 +315,12 @@ public class DatabaseController {
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Connection status returned")
     })
-    public ResponseEntity<ConnectionTestResponse> testConnection() {
+    public ResponseEntity<ConnectionTestResponse> testConnection(
+            @RequestParam(defaultValue = "PREVIEW") String environment) {
         try {
+            DatabaseEnvironment dbEnvironment = DatabaseEnvironment.fromValue(environment);
             long startTime = System.currentTimeMillis();
-            boolean connected = databaseService.testConnection();
+            boolean connected = databaseService.testConnection(dbEnvironment);
             long responseTime = System.currentTimeMillis() - startTime;
             
             if (connected) {

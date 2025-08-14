@@ -1,53 +1,57 @@
-# Multi-stage build for Spring Boot application
-# Stage 1: Build the application
-FROM eclipse-temurin:17-jdk-jammy as builder
+# syntax=docker/dockerfile:1.7
 
+############################
+# Stage 1 — Build (JDK 21) #
+############################
+FROM eclipse-temurin:21-jdk-jammy AS builder
 WORKDIR /app
 
-# Copy Maven wrapper and pom.xml for dependency caching
-COPY mvnw .
-COPY mvnw.cmd .
-COPY pom.xml .
+# Copy wrapper + pom first for better caching
+COPY mvnw mvnw
+COPY mvnw.cmd mvnw.cmd
 COPY .mvn .mvn
+COPY pom.xml pom.xml
 
-# Download dependencies (this layer will be cached if pom.xml doesn't change)
-RUN ./mvnw dependency:go-offline -B
+# Ensure wrapper is executable (important in Linux containers)
+RUN chmod +x mvnw
 
-# Copy source code
+# Warm dependency cache (uses BuildKit cache for ~/.m2)
+RUN --mount=type=cache,target=/root/.m2,sharing=locked \
+    ./mvnw -B -q -V dependency:go-offline
+
+# Copy sources
 COPY src src
 
-# Build the application
-RUN ./mvnw package -DskipTests
+# Build with Maven, reusing the ~/.m2 cache
+RUN --mount=type=cache,target=/root/.m2,sharing=locked \
+    ./mvnw -B package -DskipTests
 
-# Stage 2: Create the runtime image
-FROM eclipse-temurin:17-jre-jammy
-
+##################################
+# Stage 2 — Runtime (JRE 21)     #
+##################################
+FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
 
-# Install curl for health checks
+# Optional: curl for health checks
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user for security
+# Non-root user
 RUN groupadd --system spring && useradd --system --gid spring spring
 
-# Copy the built JAR file from the builder stage
+# Copy built jar
 COPY --from=builder /app/target/*.jar app.jar
-
-# Change ownership to the spring user
 RUN chown spring:spring app.jar
-
-# Switch to non-root user
 USER spring
 
-# Expose the port the app runs on
+# Expose app port
 EXPOSE 8080
 
-# Add health check using the actuator endpoint
+# Health check (requires Spring Boot Actuator)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:8080/actuator/health || exit 1
+  CMD curl -fsS http://localhost:8080/actuator/health || exit 1
 
-# Set JVM options for containerized environments
+# JVM options
 ENV JAVA_OPTS="-Xmx512m -Xms256m -Djava.security.egd=file:/dev/./urandom"
 
-# Run the application
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"] 
+# Run
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

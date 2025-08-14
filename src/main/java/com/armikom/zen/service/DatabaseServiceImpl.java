@@ -1,5 +1,6 @@
 package com.armikom.zen.service;
 
+import com.armikom.zen.enums.DatabaseEnvironment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,45 +28,99 @@ public class DatabaseServiceImpl implements DatabaseService {
     private static final Pattern VALID_PASSWORD_PATTERN = Pattern.compile("^[a-zA-Z0-9@#$%^&+=!-]{8,128}$");
     private static final Pattern VALID_DB_NAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_-]{3,64}$");
 
-    @Value("${spring.datasource.url}")
-    private String connectionString;
+    // Preview Database Configuration
+    @Value("${database.preview.url}")
+    private String previewConnectionString;
 
-    @Value("${spring.datasource.username}")
-    private String adminUsername;
+    @Value("${database.preview.username}")
+    private String previewAdminUsername;
 
-    @Value("${spring.datasource.password}")
-    private String adminPassword;
+    @Value("${database.preview.password}")
+    private String previewAdminPassword;
 
-    @Value("${spring.datasource.driver-class-name}")
-    private String driverClassName;
+    @Value("${database.preview.driver-class-name}")
+    private String previewDriverClassName;
+
+    // Production Database Configuration
+    @Value("${database.production.url}")
+    private String productionConnectionString;
+
+    @Value("${database.production.username}")
+    private String productionAdminUsername;
+
+    @Value("${database.production.password}")
+    private String productionAdminPassword;
+
+    @Value("${database.production.driver-class-name}")
+    private String productionDriverClassName;
+
+    /**
+     * Gets database configuration for the specified environment
+     */
+    private DatabaseConfig getDatabaseConfig(DatabaseEnvironment environment) {
+        switch (environment) {
+            case PREVIEW:
+                return new DatabaseConfig(previewConnectionString, previewAdminUsername, 
+                                        previewAdminPassword, previewDriverClassName);
+            case PRODUCTION:
+                return new DatabaseConfig(productionConnectionString, productionAdminUsername, 
+                                        productionAdminPassword, productionDriverClassName);
+            default:
+                throw new IllegalArgumentException("Unsupported database environment: " + environment);
+        }
+    }
 
     /**
      * Gets a connection to MySQL server (without specifying a database)
      */
-    private Connection getServerConnection() throws SQLException {
+    private Connection getServerConnection(DatabaseEnvironment environment) throws SQLException {
+        DatabaseConfig config = getDatabaseConfig(environment);
         // Extract server URL without database name
-        String serverUrl = connectionString.substring(0, connectionString.lastIndexOf('/'));
+        String serverUrl = config.getUrl().substring(0, config.getUrl().lastIndexOf('/'));
         return DriverManager.getConnection(serverUrl + "?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC", 
-                                         adminUsername, adminPassword);
+                                         config.getUsername(), config.getPassword());
     }
 
     /**
      * Gets a connection to a specific database
      */
-    private Connection getDatabaseConnection(String databaseName) throws SQLException {
+    private Connection getDatabaseConnection(DatabaseEnvironment environment, String databaseName) throws SQLException {
         validateDatabaseName(databaseName);
-        String serverUrl = connectionString.substring(0, connectionString.lastIndexOf('/'));
+        DatabaseConfig config = getDatabaseConfig(environment);
+        String serverUrl = config.getUrl().substring(0, config.getUrl().lastIndexOf('/'));
         return DriverManager.getConnection(serverUrl + "/" + databaseName + "?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC", 
-                                         adminUsername, adminPassword);
+                                         config.getUsername(), config.getPassword());
+    }
+
+    /**
+     * Inner class to hold database configuration
+     */
+    private static class DatabaseConfig {
+        private final String url;
+        private final String username;
+        private final String password;
+        private final String driverClassName;
+
+        public DatabaseConfig(String url, String username, String password, String driverClassName) {
+            this.url = url;
+            this.username = username;
+            this.password = password;
+            this.driverClassName = driverClassName;
+        }
+
+        public String getUrl() { return url; }
+        public String getUsername() { return username; }
+        public String getPassword() { return password; }
+        public String getDriverClassName() { return driverClassName; }
     }
 
     @Override
-    public boolean createDatabase(String databaseName, String username, String password) throws SQLException {
+    public boolean createDatabase(DatabaseEnvironment environment, String databaseName, String username, String password) throws SQLException {
         validateDatabaseName(databaseName);
         validateUsername(username);
         validatePassword(password);
 
-        try (Connection connection = getServerConnection()) {
+        try (Connection connection = getServerConnection(environment)) {
             // Create database
             String createDbSql = "CREATE DATABASE IF NOT EXISTS " + escapeIdentifier(databaseName) + 
                                " CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
@@ -105,10 +160,10 @@ public class DatabaseServiceImpl implements DatabaseService {
     }
 
     @Override
-    public boolean trimAllTables(String databaseName) throws SQLException {
+    public boolean trimAllTables(DatabaseEnvironment environment, String databaseName) throws SQLException {
         validateDatabaseName(databaseName);
 
-        try (Connection connection = getDatabaseConnection(databaseName)) {
+        try (Connection connection = getDatabaseConnection(environment, databaseName)) {
             // Get all table names
             List<String> tableNames = new ArrayList<>();
             String getTablesSql = "SELECT table_name FROM information_schema.tables WHERE table_schema = ?";
@@ -156,10 +211,10 @@ public class DatabaseServiceImpl implements DatabaseService {
     }
 
     @Override
-    public boolean dropAllTables(String databaseName) throws SQLException {
+    public boolean dropAllTables(DatabaseEnvironment environment, String databaseName) throws SQLException {
         validateDatabaseName(databaseName);
 
-        try (Connection connection = getDatabaseConnection(databaseName)) {
+        try (Connection connection = getDatabaseConnection(environment, databaseName)) {
             // Get all table names
             List<String> tableNames = new ArrayList<>();
             String getTablesSql = "SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_type = 'BASE TABLE'";
@@ -207,18 +262,19 @@ public class DatabaseServiceImpl implements DatabaseService {
     }
 
     @Override
-    public boolean createBackup(String databaseName, String backupFilePath) throws SQLException, IOException {
+    public boolean createBackup(DatabaseEnvironment environment, String databaseName, String backupFilePath) throws SQLException, IOException {
         validateDatabaseName(databaseName);
         validateFilePath(backupFilePath);
 
         try {
+            DatabaseConfig config = getDatabaseConfig(environment);
             // Use mysqldump command for better backup
             ProcessBuilder processBuilder = new ProcessBuilder(
                 "mysqldump",
                 "--host=localhost",
                 "--port=3306",
-                "--user=" + adminUsername,
-                "--password=" + adminPassword,
+                "--user=" + config.getUsername(),
+                "--password=" + config.getPassword(),
                 "--single-transaction",
                 "--routines",
                 "--triggers",
@@ -259,7 +315,7 @@ public class DatabaseServiceImpl implements DatabaseService {
     }
 
     @Override
-    public boolean restoreDatabase(String databaseName, String backupFilePath) throws SQLException, IOException {
+    public boolean restoreDatabase(DatabaseEnvironment environment, String databaseName, String backupFilePath) throws SQLException, IOException {
         validateDatabaseName(databaseName);
         validateFilePath(backupFilePath);
 
@@ -268,13 +324,14 @@ public class DatabaseServiceImpl implements DatabaseService {
         }
 
         try {
+            DatabaseConfig config = getDatabaseConfig(environment);
             // Use mysql command to restore from backup
             ProcessBuilder processBuilder = new ProcessBuilder(
                 "mysql",
                 "--host=localhost",
                 "--port=3306",
-                "--user=" + adminUsername,
-                "--password=" + adminPassword
+                "--user=" + config.getUsername(),
+                "--password=" + config.getPassword()
             );
 
             processBuilder.redirectErrorStream(true);
@@ -317,12 +374,12 @@ public class DatabaseServiceImpl implements DatabaseService {
     }
 
     @Override
-    public boolean changeUserPassword(String databaseName, String username, String newPassword) throws SQLException {
+    public boolean changeUserPassword(DatabaseEnvironment environment, String databaseName, String username, String newPassword) throws SQLException {
         validateDatabaseName(databaseName);
         validateUsername(username);
         validatePassword(newPassword);
 
-        try (Connection connection = getServerConnection()) {
+        try (Connection connection = getServerConnection(environment)) {
             String alterUserSql = "ALTER USER ?@'%' IDENTIFIED BY ?";
             
             try (PreparedStatement pstmt = connection.prepareStatement(alterUserSql)) {
@@ -346,11 +403,11 @@ public class DatabaseServiceImpl implements DatabaseService {
     }
 
     @Override
-    public boolean testConnection() {
-        try (Connection connection = getServerConnection()) {
+    public boolean testConnection(DatabaseEnvironment environment) {
+        try (Connection connection = getServerConnection(environment)) {
             return connection.isValid(5); // 5 seconds timeout
         } catch (SQLException e) {
-            logger.error("Database connection test failed", e);
+            logger.error("Database connection test failed for environment: {}", environment, e);
             return false;
         }
     }

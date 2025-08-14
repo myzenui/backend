@@ -1,0 +1,6 @@
+DOCKER_BUILDKIT=1 docker build -t myzen/backend .
+
+NOT WORKING!!! 
+docker run --rm -p 8080:8080 --env-file .env -e GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json -v "$HOME/.config/gcloud/":/root/.config/gcloud/ myzen/backend:3
+
+./mvnw spring-boot:run

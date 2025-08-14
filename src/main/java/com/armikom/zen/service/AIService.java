@@ -55,6 +55,15 @@ public class AIService {
                 4. Identify the relationships between the classes. Relationships can be associations, aggregations, compositions, generalizations (inheritance), or dependencies.
                 5. Translate the classes, attributes, and relationships into PlantUML syntax.
                 6. Output the PlantUML code directly. Do not include any introductory or explanatory text.
+                7. Use dotnetcore ef core compatible types for the attributes.
+                8. Use dotnetcore ef core compatible types for the relationships.
+                9. Do not generate any methods.
+                10. Use Upper Camel Case for the class names.
+                11. Use Upper Camel Case for the attribute names.
+                12. Use Upper Camel Case for the relationship names.
+                13. Do not generate id attributes.
+                14. Put one to many relationships as Type[] (like Employee[])
+                15. In one to many relationships, put the one property like "WorkAt: Company" in the example.
 
                 Here is the project description:
                 %s
@@ -62,18 +71,22 @@ public class AIService {
                 Example of PlantUML syntax for class diagrams:
 
                 @startuml
-                class ClassName {
-                  - attribute1: type
-                  - attribute2: type
-                  + method1()
-                  + method2()
+                class Company {
+                + Name: string
+                + EstablishmentDate: DateTime
+                + Employees: Employee[]
                 }
 
-                ClassA -- ClassB : association
-                ClassC *-- ClassD : aggregation
-                ClassE o-- ClassF : composition
-                ClassG <|-- ClassH : generalization
-                ClassI ..> ClassJ : dependency
+                class Employee {
+                + FirstName: string
+                + LastName: string
+                + Position: string
+                + WorkAt: Company
+                }
+
+                Employee ||--o{ Company : Company/Employees
+
+
                 @enduml
                 """.formatted(projectDescription);
 

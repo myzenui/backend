@@ -11,17 +11,24 @@
 
 ###
 
-### 1. Test Database Connection
-GET {{baseUrl}}/test-connection
+### 1. Test Database Connection (Preview Environment)
+GET {{baseUrl}}/test-connection?environment=preview
 Accept: application/json
 
 ###
 
-### 2. Create a new database with admin user
+### 1.5. Test Database Connection (Production Environment)
+GET {{baseUrl}}/test-connection?environment=production
+Accept: application/json
+
+###
+
+### 2. Create a new database with admin user (Preview Environment)
 POST {{baseUrl}}/create
 Content-Type: application/json
 
 {
+  "environment": "PREVIEW",
   "databaseName": "{{testDbName}}",
   "username": "{{testUsername}}",
   "password": "{{testPassword}}"
@@ -29,11 +36,12 @@ Content-Type: application/json
 
 ###
 
-### 3. Create another test database for demonstration
+### 3. Create another test database for demonstration (Production Environment)
 POST {{baseUrl}}/create
 Content-Type: application/json
 
 {
+  "environment": "PRODUCTION",
   "databaseName": "demo_project",
   "username": "demouser",
   "password": "demopass123!"
@@ -46,6 +54,7 @@ POST {{baseUrl}}/create
 Content-Type: application/json
 
 {
+  "environment": "PREVIEW",
   "databaseName": "invalid-db-name",
   "username": "testuser",
   "password": "testpass123!"
@@ -58,6 +67,7 @@ POST {{baseUrl}}/create
 Content-Type: application/json
 
 {
+  "environment": "PREVIEW",
   "databaseName": "validdb",
   "username": "invalid-user",
   "password": "testpass123!"
@@ -70,6 +80,7 @@ POST {{baseUrl}}/create
 Content-Type: application/json
 
 {
+  "environment": "PREVIEW",
   "databaseName": "validdb",
   "username": "validuser",
   "password": "short"
@@ -82,6 +93,7 @@ POST {{baseUrl}}/trim-tables
 Content-Type: application/json
 
 {
+  "environment": "PREVIEW",
   "databaseName": "{{testDbName}}"
 }
 
@@ -92,6 +104,7 @@ POST {{baseUrl}}/drop-tables
 Content-Type: application/json
 
 {
+  "environment": "PREVIEW",
   "databaseName": "{{testDbName}}"
 }
 
@@ -102,17 +115,19 @@ POST {{baseUrl}}/backup
 Content-Type: application/json
 
 {
+  "environment": "PREVIEW",
   "databaseName": "{{testDbName}}",
   "backupFilePath": "{{backupPath}}"
 }
 
 ###
 
-### 9. Create backup with custom path
+### 9. Create backup with custom path (Production)
 POST {{baseUrl}}/backup
 Content-Type: application/json
 
 {
+  "environment": "PRODUCTION",
   "databaseName": "demo_project",
   "backupFilePath": "/tmp/demo_project_backup.sql"
 }
@@ -124,6 +139,7 @@ POST {{baseUrl}}/restore
 Content-Type: application/json
 
 {
+  "environment": "PREVIEW",
   "databaseName": "{{testDbName}}",
   "backupFilePath": "{{backupPath}}"
 }
@@ -135,6 +151,7 @@ POST {{baseUrl}}/change-password
 Content-Type: application/json
 
 {
+  "environment": "PREVIEW",
   "databaseName": "{{testDbName}}",
   "username": "{{testUsername}}",
   "newPassword": "newpass456!"
@@ -288,8 +305,14 @@ Content-Type: application/json
 
 ###
 
-### 21. Test connection (final verification)
-GET {{baseUrl}}/test-connection
+### 21. Test connection (final verification - Preview)
+GET {{baseUrl}}/test-connection?environment=preview
+Accept: application/json
+
+###
+
+### 21.5. Test connection (final verification - Production)
+GET {{baseUrl}}/test-connection?environment=production
 Accept: application/json
 
 ###
@@ -324,6 +347,13 @@ Content-Type: application/json
 ###     - drop-tables: Completely removes tables and their structure (DROP)
 ### 11. Use drop-tables with extreme caution as it's irreversible
 ### 12. Always backup before using drop-tables in production
+### 13. MULTI-ENVIRONMENT SUPPORT:
+###     - All requests now require an "environment" field in JSON payload
+###     - Valid environments: "PREVIEW", "PRODUCTION"
+###     - Each environment connects to different database servers
+###     - Connection test accepts environment as query parameter
+### 14. Configure environment-specific database connections in application.properties
+### 15. Use PREVIEW for development/testing, PRODUCTION for live systems
 
 ### Security Testing
 ### These requests test the validation and security features

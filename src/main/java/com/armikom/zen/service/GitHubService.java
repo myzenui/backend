@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.FileSystem;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -38,7 +38,7 @@ public class GitHubService {
             FileUtils.deleteDirectory(localPath.toFile());
         }
 
-        Git git = Git.cloneRepository()
+        Git.cloneRepository()
                 .setURI("https://github.com/" + githubUsername + "/" + repoName + ".git")
                 .setDirectory(localPath.toFile())
                 .setCredentialsProvider(new UsernamePasswordCredentialsProvider(githubToken, ""))
@@ -56,20 +56,24 @@ public class GitHubService {
             Files.write(file.toPath(), entry.getValue().getBytes());
             git.add().addFilepattern(entry.getKey()).call();
         }
-        git.commit().setMessage("Update files").call();
+        // Don't commit here, let pushChanges handle the commit with custom message
     }
 
     public void pushChanges(String repoName) throws GitAPIException, IOException {
+        pushChanges(repoName, "Update files");
+    }
+
+    public void pushChanges(String repoName, String commitMessage) throws GitAPIException, IOException {
         Path localPath = getLocalPath(repoName);
         Git git = Git.open(localPath.toFile());
-        git.commit().setMessage("Update files").call();
+        git.commit().setMessage(commitMessage).call();
         git.push()
                 .setCredentialsProvider(new UsernamePasswordCredentialsProvider(githubUsername, githubToken))
                 .call();
     }
 
     private Path getLocalPath(String repoName) {
-        Path localPath = Paths.get(System.getProperty("user.home"), "zen", repoName);
+        Path localPath = Paths.get(System.getProperty("user.home"), "zen", "git", repoName);
         return localPath;
     }
 }
