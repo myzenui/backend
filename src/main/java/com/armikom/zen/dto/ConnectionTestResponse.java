@@ -16,7 +16,7 @@ public class ConnectionTestResponse {
     @Schema(description = "Connection test message", example = "Database connection successful")
     private String message;
 
-    @Schema(description = "Database server information", example = "MySQL 8.0.33")
+    @Schema(description = "Database server information", example = "Microsoft SQL Server 2022")
     private String serverInfo;
 
     @Schema(description = "Connection timeout in milliseconds", example = "5000")
