@@ -12,10 +12,10 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 @SpringBootTest
 @TestPropertySource(properties = {
-    "spring.datasource.url=jdbc:mysql://localhost:3306/test_myzen?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC",
-    "spring.datasource.username=myzenuser",
+    "spring.datasource.url=jdbc:sqlserver://localhost:1433;databaseName=test_myzen;encrypt=true;trustServerCertificate=true",
+    "spring.datasource.username=sa",
     "spring.datasource.password=myzenpass",
-    "spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver"
+    "spring.datasource.driver-class-name=com.microsoft.sqlserver.jdbc.SQLServerDriver"
 })
 public class DatabaseServiceTest {
 
@@ -66,11 +66,11 @@ public class DatabaseServiceTest {
 
     @Test
     void testConnectionTest() {
-        // This will depend on whether MySQL is running and configured
+        // This will depend on whether SQL Server is running and configured
         // For a unit test, we might want to mock this
         assertDoesNotThrow(() -> {
             boolean result = databaseService.testConnection();
-            // Result can be true or false depending on MySQL availability
+            // Result can be true or false depending on SQL Server availability
             assertNotNull(result);
         });
     }

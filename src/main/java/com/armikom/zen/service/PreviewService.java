@@ -448,7 +448,7 @@ namespace Zen.Model
         String containerName = "myzen-" + projectId;
         String imageTag = "myzen/" + projectId;
         String connectionString = String.format(
-                "Server=mysql;Database=%s;User=%s;Password=%s;",
+                "Server=mssql;Database=%s;User Id=%s;Password=%s;TrustServerCertificate=true;",
                 projectId, projectId, projectId);
 
         // Stop and remove existing container if exists
