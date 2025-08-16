@@ -7,7 +7,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.*;
@@ -16,7 +15,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * MySQL implementation of DatabaseService for handling database operations
+ * Microsoft SQL Server implementation of DatabaseService for handling database operations
  */
 @Service
 public class DatabaseServiceImpl implements DatabaseService {
@@ -71,14 +70,12 @@ public class DatabaseServiceImpl implements DatabaseService {
     }
 
     /**
-     * Gets a connection to MySQL server (without specifying a database)
+     * Gets a connection to SQL Server (without specifying a database)
      */
     private Connection getServerConnection(DatabaseEnvironment environment) throws SQLException {
         DatabaseConfig config = getDatabaseConfig(environment);
-        // Extract server URL without database name
-        String serverUrl = config.getUrl().substring(0, config.getUrl().lastIndexOf('/'));
-        return DriverManager.getConnection(serverUrl + "?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC", 
-                                         config.getUsername(), config.getPassword());
+        String baseUrl = removeDatabaseName(config.getUrl());
+        return DriverManager.getConnection(baseUrl, config.getUsername(), config.getPassword());
     }
 
     /**
@@ -87,9 +84,9 @@ public class DatabaseServiceImpl implements DatabaseService {
     private Connection getDatabaseConnection(DatabaseEnvironment environment, String databaseName) throws SQLException {
         validateDatabaseName(databaseName);
         DatabaseConfig config = getDatabaseConfig(environment);
-        String serverUrl = config.getUrl().substring(0, config.getUrl().lastIndexOf('/'));
-        return DriverManager.getConnection(serverUrl + "/" + databaseName + "?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC", 
-                                         config.getUsername(), config.getPassword());
+        String baseUrl = removeDatabaseName(config.getUrl());
+        String dbUrl = baseUrl + ";databaseName=" + databaseName;
+        return DriverManager.getConnection(dbUrl, config.getUsername(), config.getPassword());
     }
 
     /**
@@ -114,6 +111,21 @@ public class DatabaseServiceImpl implements DatabaseService {
         public String getDriverClassName() { return driverClassName; }
     }
 
+    /**
+     * Removes the databaseName parameter from a JDBC URL while preserving other parameters
+     */
+    private String removeDatabaseName(String url) {
+        int idx = url.toLowerCase().indexOf(";databasename=");
+        if (idx == -1) {
+            return url;
+        }
+        int endIdx = url.indexOf(';', idx + 1);
+        if (endIdx == -1) {
+            return url.substring(0, idx);
+        }
+        return url.substring(0, idx) + url.substring(endIdx);
+    }
+
     @Override
     public boolean createDatabase(DatabaseEnvironment environment, String databaseName, String username, String password) throws SQLException {
         validateDatabaseName(databaseName);
@@ -121,35 +133,30 @@ public class DatabaseServiceImpl implements DatabaseService {
         validatePassword(password);
 
         try (Connection connection = getServerConnection(environment)) {
-            // Create database
-            String createDbSql = "CREATE DATABASE IF NOT EXISTS " + escapeIdentifier(databaseName) + 
-                               " CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
-            
+            // Create database if it doesn't exist
+            String createDbSql = "IF DB_ID('" + databaseName + "') IS NULL CREATE DATABASE [" + databaseName + "]";
             try (Statement stmt = connection.createStatement()) {
                 stmt.executeUpdate(createDbSql);
                 logger.info("Database '{}' created successfully", databaseName);
             }
 
-            // Create user and grant privileges
-            String createUserSql = "CREATE USER IF NOT EXISTS ?@'%' IDENTIFIED BY ?";
-            try (PreparedStatement pstmt = connection.prepareStatement(createUserSql)) {
+            // Create login for the user if it doesn't exist
+            String createLoginSql = "IF NOT EXISTS (SELECT * FROM sys.sql_logins WHERE name = ?) CREATE LOGIN [" + username + "] WITH PASSWORD = ?";
+            try (PreparedStatement pstmt = connection.prepareStatement(createLoginSql)) {
                 pstmt.setString(1, username);
                 pstmt.setString(2, password);
                 pstmt.executeUpdate();
-                logger.info("User '{}' created successfully", username);
+                logger.info("Login '{}' created successfully", username);
             }
+        }
 
-            // Grant all privileges on the database to the user
-            String grantSql = "GRANT ALL PRIVILEGES ON " + escapeIdentifier(databaseName) + ".* TO ?@'%'";
-            try (PreparedStatement pstmt = connection.prepareStatement(grantSql)) {
-                pstmt.setString(1, username);
-                pstmt.executeUpdate();
-                logger.info("Privileges granted to user '{}' on database '{}'", username, databaseName);
-            }
-
-            // Flush privileges
-            try (Statement stmt = connection.createStatement()) {
-                stmt.executeUpdate("FLUSH PRIVILEGES");
+        // Create database user and grant privileges
+        try (Connection dbConn = getDatabaseConnection(environment, databaseName)) {
+            String createUserSql = "IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = '" + username + "') CREATE USER [" + username + "] FOR LOGIN [" + username + "]";
+            try (Statement stmt = dbConn.createStatement()) {
+                stmt.executeUpdate(createUserSql);
+                stmt.executeUpdate("ALTER ROLE db_owner ADD MEMBER [" + username + "]");
+                logger.info("User '{}' created and granted db_owner on database '{}'", username, databaseName);
             }
 
             return true;
@@ -164,16 +171,14 @@ public class DatabaseServiceImpl implements DatabaseService {
         validateDatabaseName(databaseName);
 
         try (Connection connection = getDatabaseConnection(environment, databaseName)) {
-            // Get all table names
-            List<String> tableNames = new ArrayList<>();
-            String getTablesSql = "SELECT table_name FROM information_schema.tables WHERE table_schema = ?";
-            
-            try (PreparedStatement pstmt = connection.prepareStatement(getTablesSql)) {
-                pstmt.setString(1, databaseName);
-                try (ResultSet rs = pstmt.executeQuery()) {
-                    while (rs.next()) {
-                        tableNames.add(rs.getString("table_name"));
-                    }
+            // Get all table names with their schemas
+            List<String[]> tableNames = new ArrayList<>();
+            String getTablesSql = "SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'";
+
+            try (PreparedStatement pstmt = connection.prepareStatement(getTablesSql);
+                 ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    tableNames.add(new String[]{rs.getString("TABLE_SCHEMA"), rs.getString("TABLE_NAME")});
                 }
             }
 
@@ -182,30 +187,26 @@ public class DatabaseServiceImpl implements DatabaseService {
                 return true;
             }
 
-            // Disable foreign key checks
             try (Statement stmt = connection.createStatement()) {
-                stmt.executeUpdate("SET FOREIGN_KEY_CHECKS = 0");
-            }
+                // Disable constraints
+                stmt.execute("EXEC sp_msforeachtable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL'");
 
-            // Truncate all tables
-            try (Statement stmt = connection.createStatement()) {
-                for (String tableName : tableNames) {
-                    String truncateSql = "TRUNCATE TABLE " + escapeIdentifier(tableName);
-                    stmt.executeUpdate(truncateSql);
-                    logger.debug("Truncated table '{}'", tableName);
+                // Delete data from all tables
+                for (String[] tbl : tableNames) {
+                    String deleteSql = "DELETE FROM " + escapeIdentifier(tbl[0]) + "." + escapeIdentifier(tbl[1]);
+                    stmt.executeUpdate(deleteSql);
+                    logger.debug("Cleared table '{}.{}'", tbl[0], tbl[1]);
                 }
+
+                // Re-enable constraints
+                stmt.execute("EXEC sp_msforeachtable 'ALTER TABLE ? WITH CHECK CHECK CONSTRAINT ALL'");
             }
 
-            // Re-enable foreign key checks
-            try (Statement stmt = connection.createStatement()) {
-                stmt.executeUpdate("SET FOREIGN_KEY_CHECKS = 1");
-            }
-
-            logger.info("Successfully truncated {} tables in database '{}'", tableNames.size(), databaseName);
+            logger.info("Successfully cleared {} tables in database '{}'", tableNames.size(), databaseName);
             return true;
 
         } catch (SQLException e) {
-            logger.error("Failed to truncate tables in database '{}'", databaseName, e);
+            logger.error("Failed to clear tables in database '{}'", databaseName, e);
             throw e;
         }
     }
@@ -215,16 +216,14 @@ public class DatabaseServiceImpl implements DatabaseService {
         validateDatabaseName(databaseName);
 
         try (Connection connection = getDatabaseConnection(environment, databaseName)) {
-            // Get all table names
-            List<String> tableNames = new ArrayList<>();
-            String getTablesSql = "SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_type = 'BASE TABLE'";
-            
-            try (PreparedStatement pstmt = connection.prepareStatement(getTablesSql)) {
-                pstmt.setString(1, databaseName);
-                try (ResultSet rs = pstmt.executeQuery()) {
-                    while (rs.next()) {
-                        tableNames.add(rs.getString("table_name"));
-                    }
+            // Get all table names with their schemas
+            List<String[]> tableNames = new ArrayList<>();
+            String getTablesSql = "SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'";
+
+            try (PreparedStatement pstmt = connection.prepareStatement(getTablesSql);
+                 ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    tableNames.add(new String[]{rs.getString("TABLE_SCHEMA"), rs.getString("TABLE_NAME")});
                 }
             }
 
@@ -233,23 +232,19 @@ public class DatabaseServiceImpl implements DatabaseService {
                 return true;
             }
 
-            // Disable foreign key checks to avoid dependency issues
             try (Statement stmt = connection.createStatement()) {
-                stmt.executeUpdate("SET FOREIGN_KEY_CHECKS = 0");
-            }
+                // Disable constraints
+                stmt.execute("EXEC sp_msforeachtable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL'");
 
-            // Drop all tables
-            try (Statement stmt = connection.createStatement()) {
-                for (String tableName : tableNames) {
-                    String dropSql = "DROP TABLE " + escapeIdentifier(tableName);
+                // Drop all tables
+                for (String[] tbl : tableNames) {
+                    String dropSql = "DROP TABLE " + escapeIdentifier(tbl[0]) + "." + escapeIdentifier(tbl[1]);
                     stmt.executeUpdate(dropSql);
-                    logger.debug("Dropped table '{}'", tableName);
+                    logger.debug("Dropped table '{}.{}'", tbl[0], tbl[1]);
                 }
-            }
 
-            // Re-enable foreign key checks
-            try (Statement stmt = connection.createStatement()) {
-                stmt.executeUpdate("SET FOREIGN_KEY_CHECKS = 1");
+                // Re-enable constraints
+                stmt.execute("EXEC sp_msforeachtable 'ALTER TABLE ? CHECK CONSTRAINT ALL'");
             }
 
             logger.info("Successfully dropped {} tables from database '{}'", tableNames.size(), databaseName);
@@ -268,40 +263,26 @@ public class DatabaseServiceImpl implements DatabaseService {
 
         try {
             DatabaseConfig config = getDatabaseConfig(environment);
-            // Use mysqldump command for better backup
+            String backupCommand = String.format(
+                "BACKUP DATABASE [%s] TO DISK='%s' WITH INIT",
+                databaseName, backupFilePath.replace("'", "''"));
+
             ProcessBuilder processBuilder = new ProcessBuilder(
-                "mysqldump",
-                "--host=localhost",
-                "--port=3306",
-                "--user=" + config.getUsername(),
-                "--password=" + config.getPassword(),
-                "--single-transaction",
-                "--routines",
-                "--triggers",
-                "--add-drop-database",
-                "--databases",
-                databaseName
+                "sqlcmd",
+                "-S", "localhost",
+                "-U", config.getUsername(),
+                "-P", config.getPassword(),
+                "-Q", backupCommand
             );
 
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
-
-            // Write output to file
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-                 FileWriter writer = new FileWriter(backupFilePath, StandardCharsets.UTF_8)) {
-                
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    writer.write(line + System.lineSeparator());
-                }
-            }
-
             int exitCode = process.waitFor();
             if (exitCode == 0) {
                 logger.info("Database backup created successfully: {}", backupFilePath);
                 return true;
             } else {
-                logger.error("mysqldump process failed with exit code: {}", exitCode);
+                logger.error("sqlcmd backup process failed with exit code: {}", exitCode);
                 return false;
             }
 
@@ -325,42 +306,26 @@ public class DatabaseServiceImpl implements DatabaseService {
 
         try {
             DatabaseConfig config = getDatabaseConfig(environment);
-            // Use mysql command to restore from backup
+            String restoreCommand = String.format(
+                "RESTORE DATABASE [%s] FROM DISK='%s' WITH REPLACE",
+                databaseName, backupFilePath.replace("'", "''"));
+
             ProcessBuilder processBuilder = new ProcessBuilder(
-                "mysql",
-                "--host=localhost",
-                "--port=3306",
-                "--user=" + config.getUsername(),
-                "--password=" + config.getPassword()
+                "sqlcmd",
+                "-S", "localhost",
+                "-U", config.getUsername(),
+                "-P", config.getPassword(),
+                "-Q", restoreCommand
             );
 
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
-
-            // Write backup file content to mysql process
-            try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream()));
-                 BufferedReader fileReader = Files.newBufferedReader(Paths.get(backupFilePath))) {
-                
-                String line;
-                while ((line = fileReader.readLine()) != null) {
-                    writer.write(line + System.lineSeparator());
-                }
-            }
-
-            // Read any output/errors
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    logger.debug("mysql output: {}", line);
-                }
-            }
-
             int exitCode = process.waitFor();
             if (exitCode == 0) {
                 logger.info("Database '{}' restored successfully from: {}", databaseName, backupFilePath);
                 return true;
             } else {
-                logger.error("mysql restore process failed with exit code: {}", exitCode);
+                logger.error("sqlcmd restore process failed with exit code: {}", exitCode);
                 return false;
             }
 
@@ -380,17 +345,11 @@ public class DatabaseServiceImpl implements DatabaseService {
         validatePassword(newPassword);
 
         try (Connection connection = getServerConnection(environment)) {
-            String alterUserSql = "ALTER USER ?@'%' IDENTIFIED BY ?";
-            
-            try (PreparedStatement pstmt = connection.prepareStatement(alterUserSql)) {
-                pstmt.setString(1, username);
-                pstmt.setString(2, newPassword);
-                pstmt.executeUpdate();
-            }
+            String alterLoginSql = "ALTER LOGIN [" + username + "] WITH PASSWORD = ?";
 
-            // Flush privileges
-            try (Statement stmt = connection.createStatement()) {
-                stmt.executeUpdate("FLUSH PRIVILEGES");
+            try (PreparedStatement pstmt = connection.prepareStatement(alterLoginSql)) {
+                pstmt.setString(1, newPassword);
+                pstmt.executeUpdate();
             }
 
             logger.info("Password changed successfully for user '{}' on database '{}'", username, databaseName);
@@ -438,9 +397,10 @@ public class DatabaseServiceImpl implements DatabaseService {
     }
 
     /**
-     * Escapes MySQL identifiers (database names, table names, etc.)
+     * Escapes SQL Server identifiers (database names, table names, etc.)
      */
     private String escapeIdentifier(String identifier) {
-        return "`" + identifier.replace("`", "``") + "`";
+        String sanitized = identifier.replace("]", "]]" );
+        return "[" + sanitized + "]";
     }
 }

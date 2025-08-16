@@ -333,7 +333,7 @@ Content-Type: application/json
 ###
 
 ### Testing Notes:
-### 1. Make sure MySQL is running and accessible
+### 1. Make sure SQL Server is running and accessible
 ### 2. Ensure the admin credentials in application.properties are correct
 ### 3. The /tmp directory should be writable for backup operations
 ### 4. Some operations may take time depending on database size
@@ -411,7 +411,7 @@ POST {{baseUrl}}/drop-tables
 Content-Type: application/json
 
 {
-  "databaseName": "testdb'; DROP DATABASE mysql; --"
+  "databaseName": "testdb'; DROP DATABASE master; --"
 }
 
 ###
@@ -431,13 +431,13 @@ Content-Type: application/json
 ### WARNING: These will permanently delete databases
 
 ### Delete test databases (manual SQL - not implemented in service)
-### You would need to connect to MySQL directly and run:
+### You would need to connect to SQL Server directly and run:
 ### DROP DATABASE IF EXISTS testdb_demo;
 ### DROP DATABASE IF EXISTS demo_project;
 ### DROP DATABASE IF EXISTS ecommerce_app;
 ### DROP DATABASE IF EXISTS myapp_dev;
 ### DROP DATABASE IF EXISTS myapp_staging;
-### DROP USER IF EXISTS 'testuser'@'%';
+### DROP LOGIN testuser;
 ### DROP USER IF EXISTS 'demouser'@'%';
 ### DROP USER IF EXISTS 'ecommerceadmin'@'%';
 ### DROP USER IF EXISTS 'devuser'@'%';
