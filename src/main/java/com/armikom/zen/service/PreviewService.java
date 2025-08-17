@@ -452,11 +452,8 @@ namespace Zen.Model
 
     private void ensureParentDockerfile(Path parentPath) throws IOException {
         Path dockerfilePath = parentPath.resolve("Dockerfile");
-        if (Files.exists(dockerfilePath)) {
-            return;
-        }
         String dockerfile = """
-        FROM myzen/devcontainer:6
+        FROM myzen/devcontainer:9
         WORKDIR /workspace
         COPY nuget.config .
         COPY Zen.csproj .
@@ -477,6 +474,7 @@ namespace Zen.Model
         String containerName = "myzen-" + projectId;
         String imageTag = "myzen/" + projectId;
         String connectionString = String.format(
+                "Server=mssql_zen,1433;Database=%s;User Id=%s;Password=%s;Encrypt=true;TrustServerCertificate=true;",
                 projectId, projectId, generatePassword(projectId));
 
         // Stop and remove existing container if exists
