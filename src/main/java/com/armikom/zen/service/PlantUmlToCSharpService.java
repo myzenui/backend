@@ -36,6 +36,7 @@ public class PlantUmlToCSharpService {
         sb.append("using System;\n");
         sb.append("using System.Collections.Generic;\n");
         sb.append("using System.Collections.ObjectModel;\n\n");
+
         sb.append("namespace Zen.Model\n");
         sb.append("{\n\n");
         sb.append("    [DefaultClassOptions]\n");

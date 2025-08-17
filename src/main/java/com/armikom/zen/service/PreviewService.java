@@ -318,11 +318,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 
 namespace Zen.Model
 {
     public abstract class BaseEntity : IXafEntityObject
     {
+        [Key, Browsable(false)]
         public virtual int Id { get; set; }
         public virtual void OnCreated() { }
         public virtual void OnSaving() { }
@@ -453,7 +456,7 @@ namespace Zen.Model
     private void ensureParentDockerfile(Path parentPath) throws IOException {
         Path dockerfilePath = parentPath.resolve("Dockerfile");
         String dockerfile = """
-        FROM myzen/devcontainer:9
+        FROM myzen/devcontainer:11
         WORKDIR /workspace
         COPY nuget.config .
         COPY Zen.csproj .
