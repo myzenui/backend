@@ -121,19 +121,68 @@ public class PlantUmlToCSharpServiceTest {
         String customerClass = csharpFiles.get("Customer.cs");
         assertNotNull(customerClass);
         assertTrue(customerClass.contains("public virtual string Name { get; set; }"));
-        assertTrue(customerClass.contains("public virtual ICollection<Tour> Tours { get; set; } = new HashSet<Tour>();"));
-        assertTrue(customerClass.contains("public virtual ICollection<Reservation> Reservations { get; set; } = new HashSet<Reservation>();"));
+        assertTrue(customerClass.contains("public virtual IList<Tour> Tours { get; set; } = new ObservableCollection<Tour>();"));
+        assertTrue(customerClass.contains("public virtual IList<Reservation> Reservations { get; set; } = new ObservableCollection<Reservation>();"));
 
         String tourClass = csharpFiles.get("Tour.cs");
         assertNotNull(tourClass);
         assertTrue(tourClass.contains("public virtual string TourName { get; set; }"));
-        assertTrue(tourClass.contains("public virtual ICollection<Customer> Customers { get; set; } = new HashSet<Customer>();"));
-        assertTrue(tourClass.contains("public virtual ICollection<Agreement> Agreements { get; set; } = new HashSet<Agreement>();"));
-        assertTrue(tourClass.contains("public virtual ICollection<Hotel> Hotels { get; set; } = new HashSet<Hotel>();"));
-        assertTrue(tourClass.contains("public virtual ICollection<Room> Rooms { get; set; } = new HashSet<Room>();"));
-        assertTrue(tourClass.contains("public virtual ICollection<Activity> Activities { get; set; } = new HashSet<Activity>();"));
-        assertTrue(tourClass.contains("public virtual ICollection<Payment> Payments { get; set; } = new HashSet<Payment>();"));
-        assertTrue(tourClass.contains("public virtual ICollection<Invoice> Invoices { get; set; } = new HashSet<Invoice>();"));
+        assertTrue(tourClass.contains("public virtual IList<Customer> Customers { get; set; } = new ObservableCollection<Customer>();"));
+        assertTrue(tourClass.contains("public virtual IList<Agreement> Agreements { get; set; } = new ObservableCollection<Agreement>();"));
+        assertTrue(tourClass.contains("public virtual IList<Hotel> Hotels { get; set; } = new ObservableCollection<Hotel>();"));
+        assertTrue(tourClass.contains("public virtual IList<Room> Rooms { get; set; } = new ObservableCollection<Room>();"));
+        assertTrue(tourClass.contains("public virtual IList<Activity> Activities { get; set; } = new ObservableCollection<Activity>();"));
+        assertTrue(tourClass.contains("public virtual IList<Payment> Payments { get; set; } = new ObservableCollection<Payment>();"));
+        assertTrue(tourClass.contains("public virtual IList<Invoice> Invoices { get; set; } = new ObservableCollection<Invoice>();"));
         assertTrue(tourClass.contains("public virtual TourOperator TourOperator { get; set; }"));
+    }
+
+    @Test
+    public void testGenerateCSharpFromLabeledPlantUml() {
+        String plantUml = "@startuml\n" +
+                "class Customer {\n" +
+                "  + Name: string\n" +
+                "  + Surname: string\n" +
+                "  + Email: string\n" +
+                "  + Phone: string\n" +
+                "  + Nationality: string\n" +
+                "  + Birthdate: DateTime\n" +
+                "}\n" +
+                "class Tour {\n" +
+                "  + TourName: string\n" +
+                "  + Date: DateTime\n" +
+                "  + Duration: int\n" +
+                "}\n" +
+                "class Agreement {\n" +
+                "  - AgreementDate: DateTime\n" +
+                "  - Terms: string\n" +
+                "  - Confirmed: bool\n" +
+                "}\n" +
+                "CustomerTour \"CustomerTour\" <--> \"Agreement\" Agreement\n" +
+                "CustomerTour \"* CustomerTours\" <--> \"CustomerAtTour\" Customer\n" +
+                "CustomerTour \"* CustomerTours\" <--> \"Tour\" Tour\n" +
+                "class CustomerTour {\n" +
+                "  + Name: string\n" +
+                "}\n" +
+                "@enduml";
+
+        Map<String, String> files = service.generate(plantUml);
+
+        String customerClass = files.get("Customer.cs");
+        assertNotNull(customerClass);
+        assertTrue(customerClass.contains("public virtual IList<CustomerTour> CustomerTours { get; set; } = new ObservableCollection<CustomerTour>();"));
+
+        String customerTourClass = files.get("CustomerTour.cs");
+        assertNotNull(customerTourClass);
+        assertTrue(customerTourClass.contains("public virtual Customer CustomerAtTour { get; set; }"));
+        assertTrue(customerTourClass.contains("public virtual Tour Tour { get; set; }"));
+
+        String tourClass = files.get("Tour.cs");
+        assertNotNull(tourClass);
+        assertTrue(tourClass.contains("public virtual IList<CustomerTour> CustomerTours { get; set; } = new ObservableCollection<CustomerTour>();"));
+
+        String agreementClass = files.get("Agreement.cs");
+        assertNotNull(agreementClass);
+        assertTrue(agreementClass.contains("public virtual CustomerTour CustomerTour { get; set; }"));
     }
 }
