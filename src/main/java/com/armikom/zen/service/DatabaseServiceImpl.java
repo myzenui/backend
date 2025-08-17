@@ -141,18 +141,24 @@ public class DatabaseServiceImpl implements DatabaseService {
             }
 
             // Create login for the user if it doesn't exist
-            String createLoginSql = "IF NOT EXISTS (SELECT * FROM sys.sql_logins WHERE name = ?) CREATE LOGIN [" + username + "] WITH PASSWORD = ?";
-            try (PreparedStatement pstmt = connection.prepareStatement(createLoginSql)) {
-                pstmt.setString(1, username);
-                pstmt.setString(2, password);
-                pstmt.executeUpdate();
+            // Use Statement instead of PreparedStatement for CREATE LOGIN to avoid SQL Server issues
+            String escapedPassword = password.replace("'", "''"); // SQL escape single quotes
+            String createLoginSql = "IF NOT EXISTS (SELECT * FROM sys.sql_logins WHERE name = '" + username + "') " +
+                    "BEGIN " +
+                    "CREATE LOGIN [" + username + "] WITH PASSWORD = '" + escapedPassword + "' " +
+                    "END";
+            try (Statement stmt = connection.createStatement()) {
+                stmt.executeUpdate(createLoginSql);
                 logger.info("Login '{}' created successfully", username);
             }
         }
 
         // Create database user and grant privileges
         try (Connection dbConn = getDatabaseConnection(environment, databaseName)) {
-            String createUserSql = "IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = '" + username + "') CREATE USER [" + username + "] FOR LOGIN [" + username + "]";
+            String createUserSql = "IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = '" + username + "') " +
+                    "BEGIN " +
+                    "CREATE USER [" + username + "] FOR LOGIN [" + username + "] " +
+                    "END";
             try (Statement stmt = dbConn.createStatement()) {
                 stmt.executeUpdate(createUserSql);
                 stmt.executeUpdate("ALTER ROLE db_owner ADD MEMBER [" + username + "]");
