@@ -6,7 +6,7 @@
 @baseUrl = http://localhost:8080/api/database
 @testDbName = testdb_demo
 @testUsername = testuser
-@testPassword = MyZen25!tour-buddy
+@testPassword = MyZen25!17044b79e9bf3fe4
 @backupPath = /tmp/backup_testdb.sql
 
 ###
