@@ -58,7 +58,7 @@ public class PlantUmlToCSharpService {
                 sb.append("        public virtual IList<").append(targetType).append("> ").append(propertyName)
                   .append(" { get; set; } = new ObservableCollection<").append(targetType).append(">();\n");
             } else {
-                sb.append("        public virtual ").append(targetType).append(" ").append(propertyName).append(" { get; set; }\n");
+                sb.append("        public virtual ").append(targetType).append("? ").append(propertyName).append(" { get; set; }\n");
             }
         }
 
@@ -88,7 +88,7 @@ public class PlantUmlToCSharpService {
         }
         return classes;
     }
-
+    
     private void parseRelationships(String plantUml, List<UmlClass> classes) {
         Map<String, UmlClass> classMap = new HashMap<>();
         for (UmlClass c : classes) {
@@ -114,8 +114,8 @@ public class PlantUmlToCSharpService {
 
                 boolean leftCollection = leftLabel.trim().startsWith("*");
                 boolean rightCollection = rightLabel.trim().startsWith("*");
-                String leftProp = leftLabel.trim().replaceFirst("^\*\s*", "");
-                String rightProp = rightLabel.trim().replaceFirst("^\*\s*", "");
+                String leftProp = leftLabel.trim().replaceFirst("^\\*\\s*", "");
+                String rightProp = rightLabel.trim().replaceFirst("^\\*\\s*", "");
 
                 class1.addRelationship(new UmlRelationship(rightProp, class2Name, rightCollection));
                 class2.addRelationship(new UmlRelationship(leftProp, class1Name, leftCollection));
@@ -159,21 +159,21 @@ public class PlantUmlToCSharpService {
     private String mapType(String plantUmlType) {
         switch (plantUmlType) {
             case "String":
-                return "string";
+                return "string?";
             case "Date":
-                return "DateTime";
+                return "DateTime?";
             case "int":
-                return "int";
+                return "int?";
             case "float":
-                return "float";
+                return "float?";
             case "boolean":
-                return "bool";
+                return "bool?";
             default:
                 if (plantUmlType.startsWith("List<")) {
                     String genericType = plantUmlType.substring(5, plantUmlType.length() - 1);
-                    return "IList<" + genericType + ">";
+                    return "IList<" + genericType + ">?";
                 }
-                return plantUmlType;
+                return plantUmlType + "?";
         }
     }
 
@@ -215,7 +215,8 @@ public class PlantUmlToCSharpService {
         sb.append("        }\n\n");
         
         // Add DbSets for all classes from PlantUML
-        for (UmlClass umlClass : umlClasses) {
+        List<UmlClass> uniqueList = umlClasses.stream().distinct().toList();
+        for (UmlClass umlClass : uniqueList) {
             sb.append("        public DbSet<").append(umlClass.name).append("> ")
               .append(pluralize(umlClass.name)).append(" { get; set; }\n");
         }
@@ -241,6 +242,21 @@ public class PlantUmlToCSharpService {
 
         void addRelationship(UmlRelationship relationship) {
             this.relationships.add(relationship);
+        }
+
+        // add compare to method to compare the name of the class
+        // todo check namespace and class name if namespace feature is added
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (obj == null || getClass() != obj.getClass()) return false;
+            UmlClass umlClass = (UmlClass) obj;
+            return name.equals(umlClass.name);
+        }
+
+        @Override
+        public int hashCode() {
+            return name.hashCode();
         }
     }
 

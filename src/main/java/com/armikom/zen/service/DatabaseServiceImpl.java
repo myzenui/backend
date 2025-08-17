@@ -239,18 +239,44 @@ public class DatabaseServiceImpl implements DatabaseService {
             }
 
             try (Statement stmt = connection.createStatement()) {
-                // Disable constraints
-                stmt.execute("EXEC sp_msforeachtable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL'");
+                // Step 1: Drop all foreign key constraints first
+                String getForeignKeysSql = """
+                    SELECT 
+                        fk.name AS constraint_name,
+                        SCHEMA_NAME(t.schema_id) AS table_schema,
+                        t.name AS table_name
+                    FROM sys.foreign_keys fk
+                    INNER JOIN sys.tables t ON fk.parent_object_id = t.object_id
+                    """;
 
-                // Drop all tables
+                List<String[]> foreignKeys = new ArrayList<>();
+                try (PreparedStatement fkStmt = connection.prepareStatement(getForeignKeysSql);
+                     ResultSet fkRs = fkStmt.executeQuery()) {
+                    while (fkRs.next()) {
+                        foreignKeys.add(new String[]{
+                            fkRs.getString("constraint_name"),
+                            fkRs.getString("table_schema"),
+                            fkRs.getString("table_name")
+                        });
+                    }
+                }
+
+                // Drop all foreign key constraints
+                for (String[] fk : foreignKeys) {
+                    String dropFkSql = "ALTER TABLE " + escapeIdentifier(fk[1]) + "." + escapeIdentifier(fk[2]) + 
+                                      " DROP CONSTRAINT " + escapeIdentifier(fk[0]);
+                    stmt.executeUpdate(dropFkSql);
+                    logger.debug("Dropped foreign key constraint '{}' from table '{}.{}'", fk[0], fk[1], fk[2]);
+                }
+
+                logger.info("Dropped {} foreign key constraints", foreignKeys.size());
+
+                // Step 2: Now drop all tables (order doesn't matter since FKs are gone)
                 for (String[] tbl : tableNames) {
                     String dropSql = "DROP TABLE " + escapeIdentifier(tbl[0]) + "." + escapeIdentifier(tbl[1]);
                     stmt.executeUpdate(dropSql);
                     logger.debug("Dropped table '{}.{}'", tbl[0], tbl[1]);
                 }
-
-                // Re-enable constraints
-                stmt.execute("EXEC sp_msforeachtable 'ALTER TABLE ? CHECK CONSTRAINT ALL'");
             }
 
             logger.info("Successfully dropped {} tables from database '{}'", tableNames.size(), databaseName);
