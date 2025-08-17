@@ -4,10 +4,8 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -36,24 +34,13 @@ public class PlantUmlToCSharpService {
         StringBuilder sb = new StringBuilder();
         sb.append("using DevExpress.Persistent.Base;\n");
         sb.append("using System;\n");
-        sb.append("using System.Collections.Generic;\n\n");
+        sb.append("using System.Collections.Generic;\n");
+        sb.append("using System.Collections.ObjectModel;\n\n");
         sb.append("namespace Zen.Model\n");
         sb.append("{\n\n");
         sb.append("    [DefaultClassOptions]\n");
         sb.append("    public class ").append(umlClass.name).append(" : BaseEntity\n");
         sb.append("    {\n");
-
-        boolean hasCollections = umlClass.relationships.stream().anyMatch(r -> r.isCollection);
-        if (hasCollections) {
-            sb.append("        public ").append(umlClass.name).append("() {\n");
-            for (UmlRelationship relationship : umlClass.relationships) {
-                if (relationship.isCollection) {
-                    String collectionName = pluralize(relationship.targetClass);
-                    sb.append("            ").append(collectionName).append(" = new HashSet<").append(relationship.targetClass).append(">();\n");
-                }
-            }
-            sb.append("        }\n\n");
-        }
 
         for (UmlAttribute attribute : umlClass.attributes) {
             sb.append("        public virtual ").append(mapType(attribute.type)).append(" ").append(capitalize(attribute.name)).append(" { get; set; }\n");
@@ -65,11 +52,11 @@ public class PlantUmlToCSharpService {
 
         for (UmlRelationship relationship : umlClass.relationships) {
             String targetType = relationship.targetClass;
-            String propertyName = relationship.targetClass;
+            String propertyName = relationship.propertyName;
 
             if (relationship.isCollection) {
-                String collectionName = pluralize(propertyName);
-                sb.append("        public virtual ICollection<").append(targetType).append("> ").append(collectionName).append(" { get; set; }\n");
+                sb.append("        public virtual IList<").append(targetType).append("> ").append(propertyName)
+                  .append(" { get; set; } = new ObservableCollection<").append(targetType).append(">();\n");
             } else {
                 sb.append("        public virtual ").append(targetType).append(" ").append(propertyName).append(" { get; set; }\n");
             }
@@ -108,12 +95,34 @@ public class PlantUmlToCSharpService {
             classMap.put(c.name, c);
         }
 
-        Set<String> processedPairs = new HashSet<>();
         String[] lines = plantUml.split("\\r?\\n");
+        Pattern labeledPattern = Pattern.compile("^\\s*(\\w+)\\s+\"([^\"]+)\"\\s+<-->\\s+\"([^\"]+)\"\\s+(\\w+)\\s*$");
         Pattern relPattern = Pattern.compile("^\\s*(\\w+)\\s+([*o]?--[*o]?)\\s+(\\w+).*");
 
         for (String line : lines) {
-            Matcher relMatcher = relPattern.matcher(line.trim());
+            String trimmed = line.trim();
+            Matcher labeledMatcher = labeledPattern.matcher(trimmed);
+            if (labeledMatcher.matches()) {
+                String class1Name = labeledMatcher.group(1);
+                String leftLabel = labeledMatcher.group(2);
+                String rightLabel = labeledMatcher.group(3);
+                String class2Name = labeledMatcher.group(4);
+
+                UmlClass class1 = classMap.get(class1Name);
+                UmlClass class2 = classMap.get(class2Name);
+                if (class1 == null || class2 == null) continue;
+
+                boolean leftCollection = leftLabel.trim().startsWith("*");
+                boolean rightCollection = rightLabel.trim().startsWith("*");
+                String leftProp = leftLabel.trim().replaceFirst("^\*\s*", "");
+                String rightProp = rightLabel.trim().replaceFirst("^\*\s*", "");
+
+                class1.addRelationship(new UmlRelationship(rightProp, class2Name, rightCollection));
+                class2.addRelationship(new UmlRelationship(leftProp, class1Name, leftCollection));
+                continue;
+            }
+
+            Matcher relMatcher = relPattern.matcher(trimmed);
             if (relMatcher.matches()) {
                 String class1Name = relMatcher.group(1);
                 String operator = relMatcher.group(2);
@@ -124,16 +133,25 @@ public class PlantUmlToCSharpService {
 
                 if (class1 == null || class2 == null) continue;
 
+                boolean class1Collection;
+                boolean class2Collection;
+
                 if (operator.equals("o--") || operator.equals("*--")) {
-                    class1.addRelationship(new UmlRelationship(class2Name, true));
-                    class2.addRelationship(new UmlRelationship(class1Name, false));
+                    class1Collection = true;
+                    class2Collection = false;
                 } else if (operator.equals("--o") || operator.equals("--*")) {
-                    class1.addRelationship(new UmlRelationship(class2Name, false));
-                    class2.addRelationship(new UmlRelationship(class1Name, true));
+                    class1Collection = false;
+                    class2Collection = true;
                 } else { // "--"
-                    class1.addRelationship(new UmlRelationship(class2Name, true));
-                    class2.addRelationship(new UmlRelationship(class1Name, true));
+                    class1Collection = true;
+                    class2Collection = true;
                 }
+
+                String prop1 = class1Collection ? pluralize(class2Name) : class2Name;
+                String prop2 = class2Collection ? pluralize(class1Name) : class1Name;
+
+                class1.addRelationship(new UmlRelationship(prop1, class2Name, class1Collection));
+                class2.addRelationship(new UmlRelationship(prop2, class1Name, class2Collection));
             }
         }
     }
@@ -153,7 +171,7 @@ public class PlantUmlToCSharpService {
             default:
                 if (plantUmlType.startsWith("List<")) {
                     String genericType = plantUmlType.substring(5, plantUmlType.length() - 1);
-                    return "ICollection<" + genericType + ">";
+                    return "IList<" + genericType + ">";
                 }
                 return plantUmlType;
         }
@@ -237,10 +255,12 @@ public class PlantUmlToCSharpService {
     }
 
     private static class UmlRelationship {
+        String propertyName;
         String targetClass;
         boolean isCollection;
 
-        UmlRelationship(String targetClass, boolean isCollection) {
+        UmlRelationship(String propertyName, String targetClass, boolean isCollection) {
+            this.propertyName = propertyName;
             this.targetClass = targetClass;
             this.isCollection = isCollection;
         }
