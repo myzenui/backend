@@ -13,6 +13,7 @@ import com.armikom.zen.model.Job;
 import com.armikom.zen.model.Project;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
@@ -41,8 +42,12 @@ public class JobService {
     private final FirebaseApp firebaseApp;
     private final Firestore firestore;
 
+    @Value("${job.service.enabled:false}")
+    private boolean jobServiceEnabled;
+
     private volatile ListenerRegistration listenerRegistration;
     private final AtomicBoolean initialized = new AtomicBoolean(false);
+    private final AtomicBoolean listenerStarted = new AtomicBoolean(false);
     private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
 
     // Track processing jobs to avoid duplicate processing
@@ -64,6 +69,11 @@ public class JobService {
     @EventListener(ContextRefreshedEvent.class)
     public void onContextRefreshed() {
         if (initialized.compareAndSet(false, true)) {
+            if (!jobServiceEnabled) {
+                logger.info("JobService is disabled via configuration (job.service.enabled=false)");
+                return;
+            }
+            
             try {
                 // Small delay to ensure Firestore is fully ready
                 Thread.sleep(1000);
@@ -82,11 +92,21 @@ public class JobService {
             return;
         }
 
+        // Prevent duplicate listeners - check if listener is already started
+        if (!listenerStarted.compareAndSet(false, true)) {
+            logger.info("Job listener already started, skipping duplicate initialization");
+            return;
+        }
+
         logger.info("JobService job listener starting..");
         if (firestore == null) {
             logger.error("Cannot start job listener: Firestore not initialized");
+            listenerStarted.set(false); // Reset flag on error
             return;
         }
+
+        // Cleanup any existing listener before creating new one
+        cleanupExistingListener();
 
         try {
             Query query = firestore.collection(JOBS_COLLECTION).whereEqualTo("status", "queued");
@@ -132,8 +152,22 @@ public class JobService {
             logger.info("Started listening to jobs collection");
         } catch (RejectedExecutionException e) {
             logger.warn("Failed to start job listener due to executor shutdown: {}", e.getMessage());
+            listenerStarted.set(false); // Reset flag on failure
         } catch (Exception e) {
             logger.error("Unexpected error starting job listener", e);
+            listenerStarted.set(false); // Reset flag on failure
+        }
+    }
+
+    private void cleanupExistingListener() {
+        if (listenerRegistration != null) {
+            try {
+                logger.debug("Cleaning up existing Firebase listener");
+                listenerRegistration.remove();
+                listenerRegistration = null;
+            } catch (Exception e) {
+                logger.warn("Error cleaning up existing listener: {}", e.getMessage());
+            }
         }
     }
 
@@ -396,11 +430,15 @@ public class JobService {
         if (listenerRegistration != null) {
             try {
                 listenerRegistration.remove();
+                listenerRegistration = null;
                 logger.info("Stopped listening to jobs collection");
             } catch (Exception e) {
                 logger.warn("Error stopping job listener: {}", e.getMessage());
             }
         }
+        
+        // Reset listener state
+        listenerStarted.set(false);
 
         // Cancel any ongoing processing
         for (Map.Entry<String, CompletableFuture<Void>> entry : processingJobs.entrySet()) {
@@ -434,6 +472,14 @@ public class JobService {
      */
     public boolean isFirebaseAvailable() {
         return firebaseApp != null && firestore != null && !shutdownRequested.get();
+    }
+
+    /**
+     * Check if the job service is enabled via configuration
+     * @return true if job service is enabled, false otherwise
+     */
+    public boolean isJobServiceEnabled() {
+        return jobServiceEnabled;
     }
 }
 
