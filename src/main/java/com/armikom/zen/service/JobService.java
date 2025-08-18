@@ -14,7 +14,7 @@ import com.armikom.zen.model.Project;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -66,8 +66,8 @@ public class JobService {
         this.firestore = firestore;
     }
 
-    @EventListener(ContextRefreshedEvent.class)
-    public void onContextRefreshed() {
+    @EventListener(ApplicationReadyEvent.class)
+    public void onApplicationReady() {
         if (initialized.compareAndSet(false, true)) {
             if (!jobServiceEnabled) {
                 logger.info("JobService is disabled via configuration (job.service.enabled=false)");
@@ -204,32 +204,43 @@ public class JobService {
 
     @Async
     public CompletableFuture<Void> processJobAsync(Job job) {
-        return CompletableFuture.runAsync(() -> {
-            if (shutdownRequested.get()) {
-                logger.info("Shutdown requested, skipping job processing: {}", job.getId());
-                return;
+        if (shutdownRequested.get()) {
+            logger.info("Shutdown requested, skipping job processing: {}", job.getId());
+            return CompletableFuture.completedFuture(null);
+        }
+
+        try {
+            logger.info("Starting background task for job: {}", job.getId());
+
+            if ("generate".equals(job.getType())) {
+                processGenerateJob(job);
+            } else if ("preview".equals(job.getType())) {
+                processPreviewJob(job);
+            } else {
+                logger.warn("Unknown job type: {}", job.getType());
+                updateJobStatus(job.getId(), "failed", "Unknown job type");
             }
 
-            try {
-                logger.info("Starting background task for job: {}", job.getId());
-
-                if ("generate".equals(job.getType())) {
-                    processGenerateJob(job);
-                } else if ("preview".equals(job.getType())) {
-                    processPreviewJob(job);
-                } else {
-                    logger.warn("Unknown job type: {}", job.getType());
-                    updateJobStatus(job.getId(), "failed", "Unknown job type");
-                }
-
-            } catch (Exception e) {
-                logger.error("Error in background task for job: {}", job.getId(), e);
-                updateJobStatus(job.getId(), "failed", "Error: " + e.getMessage());
-            }
-        });
+            return CompletableFuture.completedFuture(null);
+        } catch (InterruptedException e) {
+            logger.info("Job processing was interrupted: {}", job.getId());
+            updateJobStatus(job.getId(), "cancelled", "Job was cancelled");
+            Thread.currentThread().interrupt(); // Restore interrupted status
+            return CompletableFuture.failedFuture(e);
+        } catch (Exception e) {
+            logger.error("Error in background task for job: {}", job.getId(), e);
+            updateJobStatus(job.getId(), "failed", "Error: " + e.getMessage());
+            return CompletableFuture.failedFuture(e);
+        }
     }
 
     private void processGenerateJob(Job job) throws Exception {
+        // Check for interruption before starting
+        if (Thread.currentThread().isInterrupted()) {
+            logger.info("Thread interrupted, cancelling job processing: {}", job.getId());
+            throw new InterruptedException("Job processing was cancelled");
+        }
+
         // Get project information
         Project project = projectService.retrieveAndLogProject(job.getProjectId(), job.getUserId());
         if (project == null) {
@@ -237,6 +248,12 @@ public class JobService {
                     job.getId(), job.getProjectId(), job.getUserId());
             updateJobStatus(job.getId(), "failed", "Project not found");
             return;
+        }
+
+        // Check for interruption before AI call
+        if (Thread.currentThread().isInterrupted()) {
+            logger.info("Thread interrupted, cancelling job processing: {}", job.getId());
+            throw new InterruptedException("Job processing was cancelled");
         }
 
         // Generate PlantUML diagram using AIService
@@ -249,6 +266,12 @@ public class JobService {
 
         logger.info("Generated PlantUML diagram for job {}", job.getId());
 
+        // Check for interruption before database updates
+        if (Thread.currentThread().isInterrupted()) {
+            logger.info("Thread interrupted, cancelling job processing: {}", job.getId());
+            throw new InterruptedException("Job processing was cancelled");
+        }
+
         // Update project with the generated PlantUML business class model
         updateProjectBusinessModel(job.getProjectId(), plantUmlDiagram);
 
@@ -260,6 +283,12 @@ public class JobService {
 
     private void processPreviewJob(Job job) {
         try {
+            // Check for interruption before starting
+            if (Thread.currentThread().isInterrupted()) {
+                logger.info("Thread interrupted, cancelling preview job processing: {}", job.getId());
+                throw new InterruptedException("Preview job processing was cancelled");
+            }
+
             logger.info("Processing preview job: {}", job.getId());
 
             // Get project information
@@ -280,6 +309,12 @@ public class JobService {
                 return;
             }
 
+            // Check for interruption before preview generation
+            if (Thread.currentThread().isInterrupted()) {
+                logger.info("Thread interrupted, cancelling preview job processing: {}", job.getId());
+                throw new InterruptedException("Preview job processing was cancelled");
+            }
+
             // Generate preview using PreviewService
             boolean success = previewService.generatePreview(job.getProjectId(), plantUml);
             if (success) {
@@ -291,6 +326,10 @@ public class JobService {
                 logger.error("Preview job failed for job: {}", job.getId());
             }
 
+        } catch (InterruptedException e) {
+            logger.info("Preview job processing was interrupted: {}", job.getId());
+            updateJobStatus(job.getId(), "cancelled", "Job was cancelled");
+            Thread.currentThread().interrupt(); // Restore interrupted status
         } catch (Exception e) {
             logger.error("Error processing preview job: {}", job.getId(), e);
             updateJobStatus(job.getId(), "failed", "Error: " + e.getMessage());
