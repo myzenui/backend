@@ -18,6 +18,9 @@ RUN chmod +x mvnw
 # Copy sources
 COPY src src
 
+# Build the application
+RUN ./mvnw package -DskipTests
+
 ##################################
 # Stage 2 — Runtime (JRE 21)     #
 ##################################
