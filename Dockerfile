@@ -15,10 +15,6 @@ COPY pom.xml pom.xml
 # Ensure wrapper is executable (important in Linux containers)
 RUN chmod +x mvnw
 
-# Warm dependency cache (uses BuildKit cache for ~/.m2)
-RUN --mount=type=cache,target=/root/.m2,sharing=locked \
-  ./mvnw -B -q -V dependency:go-offline
-
 # Copy sources
 COPY src src
 
