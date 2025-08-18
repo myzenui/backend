@@ -17,10 +17,14 @@ RUN chmod +x mvnw
 
 # Warm dependency cache (uses BuildKit cache for ~/.m2)
 RUN --mount=type=cache,target=/root/.m2,sharing=locked \
-  ./mvnw -B -q -V dependency:go-offline
+    ./mvnw -B -q -V dependency:go-offline
 
 # Copy sources
 COPY src src
+
+# Build with Maven, reusing the ~/.m2 cache
+RUN --mount=type=cache,target=/root/.m2,sharing=locked \
+    ./mvnw -B package -DskipTests
 
 ##################################
 # Stage 2 — Runtime (JRE 21)     #
