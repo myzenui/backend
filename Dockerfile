@@ -26,27 +26,33 @@ RUN ./mvnw package -DskipTests
 ##################################
 FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl gnupg \
+    && curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
+    && curl https://packages.microsoft.com/config/ubuntu/22.04/mssql-server-2022.list | tee /etc/apt/sources.list.d/mssql-server.list \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y mssql-server \
+    && rm -rf /var/lib/apt/lists/*
 
-# Optional: curl for health checks
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
-
-# Non-root user
+# Non-root user for the application
 RUN groupadd --system spring && useradd --system --gid spring spring
 
 # Copy built jar
 COPY --from=builder /app/target/*.jar app.jar
 RUN chown spring:spring app.jar
-USER spring
 
-# Expose app port
-EXPOSE 8080
+# Expose application and database ports
+EXPOSE 8080 1433
+
+# Default SQL Server configuration
+ENV ACCEPT_EULA=Y \
+    MSSQL_SA_PASSWORD=YourStrong!Passw0rd \
+    MSSQL_PID=Express \
+    JAVA_OPTS="-Xmx512m -Xms256m -Djava.security.egd=file:/dev/./urandom"
 
 # Health check (requires Spring Boot Actuator)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
   CMD curl -fsS http://localhost:8080/actuator/health || exit 1
 
-# JVM options
-ENV JAVA_OPTS="-Xmx512m -Xms256m -Djava.security.egd=file:/dev/./urandom"
-
-# Run
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+# Run SQL Server in background then start the app as non-root user
+ENTRYPOINT ["sh", "-c", "/opt/mssql/bin/sqlservr & su spring -c 'java $JAVA_OPTS -jar app.jar'"]

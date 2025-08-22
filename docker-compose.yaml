@@ -3,6 +3,10 @@ services:
     image: myzen/backend:3
     ports:
       - 8080:8080
-
+      - 1433:1433
     env_file:
       - .env
+    environment:
+      - MSSQL_SA_PASSWORD=YourStrong!Passw0rd
+      - ACCEPT_EULA=Y
+
