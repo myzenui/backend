@@ -97,11 +97,59 @@ public class PlantUmlToCSharpService {
         }
 
         String[] lines = plantUml.split("\\r?\\n");
+        // New pattern for the format: Employee "Vehicles" *-- "Employee" Vehicle
+        Pattern newAssociationPattern = Pattern.compile("^\\s*(\\w+)\\s+\"([^\"]+)\"\\s+([*o]?--[*o]?)\\s+\"([^\"]+)\"\\s+(\\w+)\\s*$");
+        // Legacy pattern for old format with <-->
         Pattern labeledPattern = Pattern.compile("^\\s*(\\w+)\\s+\"([^\"]+)\"\\s+<-->\\s+\"([^\"]+)\"\\s+(\\w+)\\s*$");
         Pattern relPattern = Pattern.compile("^\\s*(\\w+)\\s+([*o]?--[*o]?)\\s+(\\w+).*");
 
         for (String line : lines) {
             String trimmed = line.trim();
+            
+            // First check for new association pattern: Employee "Vehicles" *-- "Employee" Vehicle
+            Matcher newAssocMatcher = newAssociationPattern.matcher(trimmed);
+            if (newAssocMatcher.matches()) {
+                String class1Name = newAssocMatcher.group(1);
+                String leftPropertyName = newAssocMatcher.group(2);
+                String operator = newAssocMatcher.group(3);
+                String rightPropertyName = newAssocMatcher.group(4);
+                String class2Name = newAssocMatcher.group(5);
+
+                UmlClass class1 = classMap.get(class1Name);
+                UmlClass class2 = classMap.get(class2Name);
+                if (class1 == null || class2 == null) continue;
+
+                // Determine collection types based on the operator
+                boolean class1Collection = false;
+                boolean class2Collection = false;
+
+                if (operator.equals("*--")) {
+                    class1Collection = true;
+                    class2Collection = false;
+                } else if (operator.equals("--*")) {
+                    class1Collection = false;
+                    class2Collection = true;
+                } else if (operator.equals("*--*")) {
+                    class1Collection = true;
+                    class2Collection = true;
+                } else if (operator.equals("o--")) {
+                    class1Collection = true;
+                    class2Collection = false;
+                } else if (operator.equals("--o")) {
+                    class1Collection = false;
+                    class2Collection = true;
+                } else { // "--"
+                    class1Collection = false;
+                    class2Collection = false;
+                }
+
+                // Add relationships using the property names from the labels
+                class1.addRelationship(new UmlRelationship(leftPropertyName, class2Name, class1Collection));
+                class2.addRelationship(new UmlRelationship(rightPropertyName, class1Name, class2Collection));
+                continue;
+            }
+            
+            // Check for legacy labeled pattern
             Matcher labeledMatcher = labeledPattern.matcher(trimmed);
             if (labeledMatcher.matches()) {
                 String class1Name = labeledMatcher.group(1);
@@ -123,6 +171,7 @@ public class PlantUmlToCSharpService {
                 continue;
             }
 
+            // Check for basic relationship pattern
             Matcher relMatcher = relPattern.matcher(trimmed);
             if (relMatcher.matches()) {
                 String class1Name = relMatcher.group(1);

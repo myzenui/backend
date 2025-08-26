@@ -13,176 +13,94 @@ public class PlantUmlToCSharpServiceTest {
     private final PlantUmlToCSharpService service = new PlantUmlToCSharpService();
 
     @Test
-    public void testGenerateCSharpFromPlantUml() {
+    public void testGenerateCSharpFromNewAssociationSyntax() {
         String plantUml = "@startuml\n" +
-                "class Customer {\n" +
-                "  + name: String\n" +
-                "  + email: String\n" +
-                "  + phone: String\n" +
-                "  + dateOfBirth: Date\n" +
-                "  + id: int\n" +
-                "}\n" +
-                "\n" +
-                "class Tour {\n" +
-                "  + tourName: String\n" +
-                "  + duration: int\n" +
-                "  + itinerary: List<Activity>\n" +
-                "  + id: int\n" +
-                "  + photoAlbumLink: String\n" +
-                "  + description: String\n" +
-                "  + startDate: Date\n" +
-                "  + endDate: Date\n" +
-                "  + transportDescription: String\n" +
-                "}\n" +
-                "\n" +
-                "class Activity {\n" +
-                "  + startDate: Date\n" +
-                "  + endDate: Date\n" +
-                "  + location: String\n" +
-                "  + details: String\n" +
-                "  + measures: String\n" +
-                "  + id: int\n" +
-                "}\n" +
-                "\n" +
-                "class Hotel {\n" +
-                "  + hotelName: String\n" +
-                "  + address: String\n" +
-                "  + rating: float\n" +
-                "  + id: int\n" +
-                "}\n" +
-                "\n" +
-                "class Room {\n" +
-                "  + roomNumber: int\n" +
-                "  + capacity: int\n" +
-                "  + smokingAllowed: boolean\n" +
-                "  + floor: int\n" +
-                "  + id: int\n" +
-                "}\n" +
-                "\n" +
-                "class Agreement {\n" +
-                "  + agreementDate: Date\n" +
-                "  + terms: String\n" +
-                "  + id: int\n" +
-                "}\n" +
-                "\n" +
-                "class TourOperator {\n" +
-                "  + operatorName: String\n" +
-                "  + phone: String\n" +
-                "  + email: String\n" +
-                "  + address: String\n" +
-                "  + website: String\n" +
-                "  + services: List<String>\n" +
-                "  + id: int\n" +
-                "}\n" +
-                "\n" +
-                "class Reservation {\n" +
-                "  + customerId: int\n" +
-                "  + roomId: int\n" +
-                "  + checkInDate: Date\n" +
-                "  + checkOutDate: Date\n" +
-                "}\n" +
-                "\n" +
-                "class Payment {\n" +
-                "  + amount: float\n" +
-                "  + paymentDate: Date\n" +
-                "  + tourId: int\n" +
-                "  + customerId: int\n" +
-                "  + id: int\n" +
-                "}\n" +
-                "\n" +
-                "class Invoice {\n" +
-                "  + invoiceNumber: String\n" +
-                "  + tourId: int\n" +
-                "  + totalAmount: float\n" +
-                "  + issueDate: Date\n" +
-                "  + id: int\n" +
-                "}\n" +
-                "\n" +
-                "Customer -- Tour : makes reservation >\n" +
-                "Tour *-- Agreement : includes >\n" +
-                "Tour o-- Hotel : stays at >\n" +
-                "Hotel -- Agreement : includes >\n" +
-                "Hotel o-- Room : has >\n" +
-                "Tour o-- Room : is reserved >\n" +
-                "TourOperator -- Tour : offers >\n" +
-                "Tour -- Activity : includes >\n" +
-                "Room o-- Reservation : is booked >\n" +
-                "Customer o-- Reservation : makes >\n" +
-                "Tour o-- Customer : includes >\n" +
-                "Payment -- Tour : related to >\n" +
-                "Invoice -- Tour : related to >\n" +
-                "@enduml";
-
-        Map<String, String> csharpFiles = service.generate(plantUml);
-
-        assertNotNull(csharpFiles);
-        assertEquals(10, csharpFiles.size());
-
-        String customerClass = csharpFiles.get("Customer.cs");
-        assertNotNull(customerClass);
-        assertTrue(customerClass.contains("public virtual string Name { get; set; }"));
-        assertTrue(customerClass.contains("public virtual IList<Tour> Tours { get; set; } = new ObservableCollection<Tour>();"));
-        assertTrue(customerClass.contains("public virtual IList<Reservation> Reservations { get; set; } = new ObservableCollection<Reservation>();"));
-
-        String tourClass = csharpFiles.get("Tour.cs");
-        assertNotNull(tourClass);
-        assertTrue(tourClass.contains("public virtual string TourName { get; set; }"));
-        assertTrue(tourClass.contains("public virtual IList<Customer> Customers { get; set; } = new ObservableCollection<Customer>();"));
-        assertTrue(tourClass.contains("public virtual IList<Agreement> Agreements { get; set; } = new ObservableCollection<Agreement>();"));
-        assertTrue(tourClass.contains("public virtual IList<Hotel> Hotels { get; set; } = new ObservableCollection<Hotel>();"));
-        assertTrue(tourClass.contains("public virtual IList<Room> Rooms { get; set; } = new ObservableCollection<Room>();"));
-        assertTrue(tourClass.contains("public virtual IList<Activity> Activities { get; set; } = new ObservableCollection<Activity>();"));
-        assertTrue(tourClass.contains("public virtual IList<Payment> Payments { get; set; } = new ObservableCollection<Payment>();"));
-        assertTrue(tourClass.contains("public virtual IList<Invoice> Invoices { get; set; } = new ObservableCollection<Invoice>();"));
-        assertTrue(tourClass.contains("public virtual TourOperator TourOperator { get; set; }"));
-    }
-
-    @Test
-    public void testGenerateCSharpFromLabeledPlantUml() {
-        String plantUml = "@startuml\n" +
-                "class Customer {\n" +
+                "class Employee {\n" +
                 "  + Name: string\n" +
-                "  + Surname: string\n" +
-                "  + Email: string\n" +
-                "  + Phone: string\n" +
-                "  + Nationality: string\n" +
-                "  + Birthdate: DateTime\n" +
                 "}\n" +
-                "class Tour {\n" +
-                "  + TourName: string\n" +
-                "  + Date: DateTime\n" +
-                "  + Duration: int\n" +
+                "\n" +
+                "class Department {\n" +
+                "  + Name: string\n" +
                 "}\n" +
-                "class Agreement {\n" +
-                "  - AgreementDate: DateTime\n" +
-                "  - Terms: string\n" +
-                "  - Confirmed: bool\n" +
+                "\n" +
+                "class Project {\n" +
+                "  + Name: string\n" +
                 "}\n" +
-                "CustomerTour \"CustomerTour\" <--> \"Agreement\" Agreement\n" +
-                "CustomerTour \"* CustomerTours\" <--> \"CustomerAtTour\" Customer\n" +
-                "CustomerTour \"* CustomerTours\" <--> \"Tour\" Tour\n" +
-                "class CustomerTour {\n" +
+                "\n" +
+                "Employee \"Vehicles\" *-- \"Employee\" Vehicle\n" +
+                "Employee \"Projects\" *--* \"Employees\" Project\n" +
+                "Employee \"Department\" --* \"Employees\" Department\n" +
+                "class Vehicle {\n" +
                 "  + Name: string\n" +
                 "}\n" +
                 "@enduml";
 
         Map<String, String> files = service.generate(plantUml);
+        
+        // Verify we have all expected files
+        assertNotNull(files);
+        assertEquals(5, files.size()); // 4 entity classes + 1 ZenContext.cs
+        assertTrue(files.containsKey("Employee.cs"));
+        assertTrue(files.containsKey("Department.cs"));
+        assertTrue(files.containsKey("Project.cs"));
+        assertTrue(files.containsKey("Vehicle.cs"));
+        assertTrue(files.containsKey("ZenContext.cs"));
 
-        String customerClass = files.get("Customer.cs");
-        assertNotNull(customerClass);
-        assertTrue(customerClass.contains("public virtual IList<CustomerTour> CustomerTours { get; set; } = new ObservableCollection<CustomerTour>();"));
+        // Test Department class structure and properties
+        String departmentClass = files.get("Department.cs");
+        assertNotNull(departmentClass);
+        assertTrue(departmentClass.contains("using DevExpress.Persistent.Base;"));
+        assertTrue(departmentClass.contains("using System;"));
+        assertTrue(departmentClass.contains("using System.Collections.Generic;"));
+        assertTrue(departmentClass.contains("using System.Collections.ObjectModel;"));
+        assertTrue(departmentClass.contains("namespace Zen.Model"));
+        assertTrue(departmentClass.contains("[DefaultClassOptions]"));
+        assertTrue(departmentClass.contains("public class Department : BaseEntity"));
+        assertTrue(departmentClass.contains("public virtual string? Name { get; set; }"));
+        assertTrue(departmentClass.contains("public virtual IList<Employee> Employees { get; set; } = new ObservableCollection<Employee>();"));
 
-        String customerTourClass = files.get("CustomerTour.cs");
-        assertNotNull(customerTourClass);
-        assertTrue(customerTourClass.contains("public virtual Customer CustomerAtTour { get; set; }"));
-        assertTrue(customerTourClass.contains("public virtual Tour Tour { get; set; }"));
+        // Test Project class structure and properties
+        String projectClass = files.get("Project.cs");
+        assertNotNull(projectClass);
+        assertTrue(projectClass.contains("using DevExpress.Persistent.Base;"));
+        assertTrue(projectClass.contains("namespace Zen.Model"));
+        assertTrue(projectClass.contains("[DefaultClassOptions]"));
+        assertTrue(projectClass.contains("public class Project : BaseEntity"));
+        assertTrue(projectClass.contains("public virtual string? Name { get; set; }"));
+        assertTrue(projectClass.contains("public virtual IList<Employee> Employees { get; set; } = new ObservableCollection<Employee>();"));
 
-        String tourClass = files.get("Tour.cs");
-        assertNotNull(tourClass);
-        assertTrue(tourClass.contains("public virtual IList<CustomerTour> CustomerTours { get; set; } = new ObservableCollection<CustomerTour>();"));
+        // Test Employee class structure and properties
+        String employeeClass = files.get("Employee.cs");
+        assertNotNull(employeeClass);
+        assertTrue(employeeClass.contains("using DevExpress.Persistent.Base;"));
+        assertTrue(employeeClass.contains("namespace Zen.Model"));
+        assertTrue(employeeClass.contains("[DefaultClassOptions]"));
+        assertTrue(employeeClass.contains("public class Employee : BaseEntity"));
+        assertTrue(employeeClass.contains("public virtual string? Name { get; set; }"));
+        assertTrue(employeeClass.contains("public virtual IList<Vehicle> Vehicles { get; set; } = new ObservableCollection<Vehicle>();"));
+        assertTrue(employeeClass.contains("public virtual IList<Project> Projects { get; set; } = new ObservableCollection<Project>();"));
+        assertTrue(employeeClass.contains("public virtual Department? Department { get; set; }"));
 
-        String agreementClass = files.get("Agreement.cs");
-        assertNotNull(agreementClass);
-        assertTrue(agreementClass.contains("public virtual CustomerTour CustomerTour { get; set; }"));
+        // Test Vehicle class structure and properties
+        String vehicleClass = files.get("Vehicle.cs");
+        assertNotNull(vehicleClass);
+        assertTrue(vehicleClass.contains("using DevExpress.Persistent.Base;"));
+        assertTrue(vehicleClass.contains("namespace Zen.Model"));
+        assertTrue(vehicleClass.contains("[DefaultClassOptions]"));
+        assertTrue(vehicleClass.contains("public class Vehicle : BaseEntity"));
+        assertTrue(vehicleClass.contains("public virtual string? Name { get; set; }"));
+        assertTrue(vehicleClass.contains("public virtual Employee? Employee { get; set; }"));
+
+        // Test ZenContext class structure and properties
+        String contextClass = files.get("ZenContext.cs");
+        assertNotNull(contextClass);
+        assertTrue(contextClass.contains("using Microsoft.EntityFrameworkCore;"));
+        assertTrue(contextClass.contains("namespace Zen.Model"));
+        assertTrue(contextClass.contains("public class ZenContext : DbContext"));
+        assertTrue(contextClass.contains("public ZenContext(DbContextOptions options) : base(options)"));
+        assertTrue(contextClass.contains("public DbSet<Employee> Employees { get; set; }"));
+        assertTrue(contextClass.contains("public DbSet<Department> Departments { get; set; }"));
+        assertTrue(contextClass.contains("public DbSet<Project> Projects { get; set; }"));
+        assertTrue(contextClass.contains("public DbSet<Vehicle> Vehicles { get; set; }"));
     }
 }

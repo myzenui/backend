@@ -29,29 +29,35 @@ public class GitHubService {
     private final Logger log = LoggerFactory.getLogger(GitHubService.class);
 
     public void createRepository(String repoName) throws GitAPIException, IOException {
+        createRepository(repoName, getLocalPath(repoName));
+    }
+
+    public void createRepository(String repoName, Path workingDirectory) throws GitAPIException, IOException {
         // Create a new repository on GitHub (this part requires GitHub API, not JGit)
         // For this example, we assume the repository is already created and empty.
 
-        Path localPath = getLocalPath(repoName);
         // delete all files at the directory recursively if exists
-        if (Files.exists(localPath)) {
-            FileUtils.deleteDirectory(localPath.toFile());
+        if (Files.exists(workingDirectory)) {
+            FileUtils.deleteDirectory(workingDirectory.toFile());
         }
 
         Git.cloneRepository()
                 .setURI("https://github.com/" + githubUsername + "/" + repoName + ".git")
-                .setDirectory(localPath.toFile())
+                .setDirectory(workingDirectory.toFile())
                 .setCredentialsProvider(new UsernamePasswordCredentialsProvider(githubToken, ""))
                 .call();
-        log.info("Repository created: {}", localPath);
+        log.info("Repository cloned to: {}", workingDirectory);
     }
 
     public void mergeFiles(String repoName, Map<String, String> fileList) throws GitAPIException, IOException {
-        Path localPath = getLocalPath(repoName);
-        Git git = Git.open(localPath.toFile());
+        mergeFiles(repoName, fileList, getLocalPath(repoName));
+    }
+
+    public void mergeFiles(String repoName, Map<String, String> fileList, Path workingDirectory) throws GitAPIException, IOException {
+        Git git = Git.open(workingDirectory.toFile());
 
         for (Map.Entry<String, String> entry : fileList.entrySet()) {
-            File file = new File(localPath.toFile(), entry.getKey());
+            File file = new File(workingDirectory.toFile(), entry.getKey());
             file.getParentFile().mkdirs();
             Files.write(file.toPath(), entry.getValue().getBytes());
             git.add().addFilepattern(entry.getKey()).call();
@@ -64,12 +70,19 @@ public class GitHubService {
     }
 
     public void pushChanges(String repoName, String commitMessage) throws GitAPIException, IOException {
-        Path localPath = getLocalPath(repoName);
-        Git git = Git.open(localPath.toFile());
+        pushChanges(repoName, commitMessage, getLocalPath(repoName));
+    }
+
+    public void pushChanges(String repoName, String commitMessage, Path workingDirectory) throws GitAPIException, IOException {
+        Git git = Git.open(workingDirectory.toFile());
         git.commit().setMessage(commitMessage).call();
         git.push()
                 .setCredentialsProvider(new UsernamePasswordCredentialsProvider(githubUsername, githubToken))
                 .call();
+    }
+
+    public void pushChanges(String repoName, Path workingDirectory) throws GitAPIException, IOException {
+        pushChanges(repoName, "Update files", workingDirectory);
     }
 
     private Path getLocalPath(String repoName) {

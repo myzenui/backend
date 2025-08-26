@@ -12,7 +12,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.apache.tomcat.util.http.fileupload.FileUtils;
@@ -80,7 +82,8 @@ public class PreviewService {
             logger.info("Starting preview generation for projectId: {} (doc: {})", projectId, firestoreDocumentId);
 
             // Try to checkout project from GitHub if it exists
-            boolean projectCheckedOut = checkoutProjectFromGitHub(projectId);
+            Path previewPath = getPreviewPath(projectId);
+            boolean projectCheckedOut = checkoutProjectFromGitHub(projectId, previewPath);
             
             // Generate model files from PlantUML
             Map<String, String> generatedFiles = plantUmlToCSharpService.generate(plantUml);
@@ -90,7 +93,8 @@ public class PreviewService {
             }
 
             // Create preview folder and write files
-            if (!createPreviewFiles(projectId, generatedFiles, projectCheckedOut)) {
+            Set<String> updatedFiles = createPreviewFiles(projectId, generatedFiles, projectCheckedOut);
+            if (updatedFiles == null) {
                 logger.error("Failed to create preview files for project: {}", projectId);
                 return false;
             }
@@ -108,8 +112,15 @@ public class PreviewService {
             }
 
             // If model has been changed and preview docker builds succeeded, commit and push changes
-            if (projectCheckedOut) {
-                commitAndPushChanges(projectId, firestoreDocumentId);
+            if (projectCheckedOut && !updatedFiles.isEmpty()) {
+                try {
+                    commitAndPushChanges(projectId, firestoreDocumentId, previewPath, updatedFiles);
+                } catch (Exception e) {
+                    logger.warn("Failed to commit and push changes for project {}: {}", projectId, e.getMessage());
+                    // Don't fail the entire preview generation if git push fails
+                }
+            } else if (projectCheckedOut) {
+                logger.info("No files were updated for project {}, skipping git commit/push", projectId);
             }
 
             // Create (or ensure) database for the project using projectId for db/user/password
@@ -162,9 +173,9 @@ public class PreviewService {
      * @param projectName The project name
      * @param fileList Map of filename to file content
      * @param projectCheckedOut Whether the project was checked out from GitHub
-     * @return true if successful, false otherwise
+     * @return Set of updated files (relative paths) for git tracking, or null if creation failed
      */
-    private boolean createPreviewFiles(String projectName, Map<String, String> fileList, boolean projectCheckedOut) {
+    private Set<String> createPreviewFiles(String projectName, Map<String, String> fileList, boolean projectCheckedOut) {
         try {
             Path previewPath = getPreviewPath(projectName);
 
@@ -179,11 +190,11 @@ public class PreviewService {
                         logger.info("Deleted existing preview directory using sudo: {}", previewPath);
                     } else {
                         logger.error("Failed to delete preview directory using sudo. Exit code: {}", exitCode);
-                        return false;
+                        return null;
                     }
                 } catch (IOException | InterruptedException e) {
                     logger.error("Error executing sudo rm command: ", e);
-                    return false;
+                    return null;
                 }
             }
 
@@ -193,24 +204,29 @@ public class PreviewService {
                 logger.info("Created preview directory: {}", previewPath);
             }
 
+            // Track which files get updated for git purposes
+            Set<String> updatedFiles = new HashSet<>();
+            
             // Create basic project files only if project was not checked out from GitHub
-            if (!projectCheckedOut) {
-                createProjectFile(previewPath);
-                createNugetConfigFile(previewPath);
-            }
+            createProjectFile(previewPath, updatedFiles);
+            createNugetConfigFile(previewPath, updatedFiles);
             
             // Create Model directory first
             Path modelPath = previewPath.resolve("Model");
             Files.createDirectories(modelPath);
             logger.debug("Created Model directory: {}", modelPath);
             
-            // Create BaseEntity.cs file in Model directory only if it doesn't exist
-            Path baseEntityPath = modelPath.resolve("BaseEntity.cs");
-            if (!Files.exists(baseEntityPath)) {
-                createBaseEntityFile(modelPath);
-            }
+            // Create BaseEntity.cs file in Model directory
+            createBaseEntityFile(modelPath, previewPath, updatedFiles);
 
-            // Write all generated model files
+            // Create devcontainer.json file in .devcontainer directory
+            createDevcontainerFile(previewPath, updatedFiles);
+
+            // Create VSCode configuration files
+            createVSCodeLaunchFile(previewPath, updatedFiles);
+            createVSCodeTasksFile(previewPath, updatedFiles);
+
+            // Write all generated model files and track updates
             for (Map.Entry<String, String> entry : fileList.entrySet()) {
                 String fileName = entry.getKey();
                 String fileContent = entry.getValue();
@@ -227,16 +243,23 @@ public class PreviewService {
                 
                 // Ensure parent directories exist
                 targetPath.getParent().toFile().mkdirs();
-                Files.write(targetPath, fileContent.getBytes());
-                logger.debug("Created preview file: {}", targetPath);
+                
+                // Check if file content is different and track if updated
+                if (shouldWriteFile(targetPath, fileContent, updatedFiles, previewPath)) {
+                    Files.write(targetPath, fileContent.getBytes());
+                    logger.debug("Created/updated preview file: {}", targetPath);
+                } else {
+                    logger.debug("Generated file content unchanged: {}", targetPath);
+                }
             }
 
             logger.info("Successfully created {} preview files for project: {}", fileList.size(), projectName);
-            return true;
+            logger.info("Total updated files tracked for git: {}", updatedFiles.size());
+            return updatedFiles;
 
         } catch (IOException e) {
             logger.error("Error creating preview files for project: {}", projectName, e);
-            return false;
+            return null;
         }
     }
 
@@ -262,9 +285,36 @@ public class PreviewService {
     }
 
     /**
+     * Helper method to check if file content needs to be updated and track updated files
+     * @param filePath Path to the file to check
+     * @param newContent The new content to compare against
+     * @param updatedFiles Set to track which files were updated (relative to preview path)
+     * @param previewPath The preview path to calculate relative paths
+     * @return true if file should be written (doesn't exist or content is different), false otherwise
+     */
+    private boolean shouldWriteFile(Path filePath, String newContent, Set<String> updatedFiles, Path previewPath) throws IOException {
+        boolean shouldWrite = false;
+        
+        if (!Files.exists(filePath)) {
+            shouldWrite = true;
+        } else {
+            String existingContent = Files.readString(filePath, StandardCharsets.UTF_8);
+            shouldWrite = !existingContent.equals(newContent);
+        }
+        
+        // Track the file if it will be updated
+        if (shouldWrite && updatedFiles != null) {
+            String relativePath = previewPath.relativize(filePath).toString().replace('\\', '/');
+            updatedFiles.add(relativePath);
+        }
+        
+        return shouldWrite;
+    }
+
+    /**
      * Creates a basic .csproj file for the preview project
      */
-    private void createProjectFile(Path previewPath) throws IOException {
+    private void createProjectFile(Path previewPath, Set<String> updatedFiles) throws IOException {
         String csprojContent = """
 <Project Sdk="Microsoft.NET.Sdk">
 
@@ -284,14 +334,20 @@ public class PreviewService {
                 """;
 
         Path csprojPath = previewPath.resolve("Zen.csproj");
-        Files.write(csprojPath, csprojContent.getBytes());
-        logger.debug("Created project file: {}", csprojPath);
+        
+        // Only write file if content is different or file doesn't exist
+        if (shouldWriteFile(csprojPath, csprojContent, updatedFiles, previewPath)) {
+            Files.write(csprojPath, csprojContent.getBytes());
+            logger.debug("Created/updated project file: {}", csprojPath);
+        } else {
+            logger.debug("Project file content unchanged: {}", csprojPath);
+        }
     }
 
     /**
      * Creates a nuget.config file for the preview project
      */
-    private void createNugetConfigFile(Path previewPath) throws IOException {
+    private void createNugetConfigFile(Path previewPath, Set<String> updatedFiles) throws IOException {
         String nugetConfigContent = """
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
@@ -303,14 +359,20 @@ public class PreviewService {
                 """;
 
         Path nugetConfigPath = previewPath.resolve("nuget.config");
-        Files.write(nugetConfigPath, nugetConfigContent.getBytes());
-        logger.debug("Created nuget.config file: {}", nugetConfigPath);
+        
+        // Only write file if content is different or file doesn't exist
+        if (shouldWriteFile(nugetConfigPath, nugetConfigContent, updatedFiles, previewPath)) {
+            Files.write(nugetConfigPath, nugetConfigContent.getBytes());
+            logger.debug("Created/updated nuget.config file: {}", nugetConfigPath);
+        } else {
+            logger.debug("Nuget config file content unchanged: {}", nugetConfigPath);
+        }
     }
 
     /**
      * Creates a BaseEntity.cs file for the preview project
      */
-    private void createBaseEntityFile(Path modelPath) throws IOException {
+    private void createBaseEntityFile(Path modelPath, Path previewPath, Set<String> updatedFiles) throws IOException {
         String baseEntityContent = """
 using DevExpress.ExpressApp;
 using System;
@@ -335,8 +397,163 @@ namespace Zen.Model
                 """;
 
         Path baseEntityPath = modelPath.resolve("BaseEntity.cs");
-        Files.write(baseEntityPath, baseEntityContent.getBytes());
-        logger.debug("Created BaseEntity.cs file: {}", baseEntityPath);
+        
+        // Only write file if content is different or file doesn't exist
+        if (shouldWriteFile(baseEntityPath, baseEntityContent, updatedFiles, previewPath)) {
+            Files.write(baseEntityPath, baseEntityContent.getBytes());
+            logger.debug("Created/updated BaseEntity.cs file: {}", baseEntityPath);
+        } else {
+            logger.debug("BaseEntity.cs file content unchanged: {}", baseEntityPath);
+        }
+    }
+
+    /**
+     * Creates a devcontainer.json file for the preview project
+     */
+    private void createDevcontainerFile(Path previewPath, Set<String> updatedFiles) throws IOException {
+        // Create .devcontainer directory if it doesn't exist
+        Path devcontainerDir = previewPath.resolve(".devcontainer");
+        if (!Files.exists(devcontainerDir)) {
+            Files.createDirectories(devcontainerDir);
+            logger.debug("Created .devcontainer directory: {}", devcontainerDir);
+        }
+
+        String devcontainerContent = """
+{
+    "image": "myzen/devcontainer:18",
+    "postStartCommand": "/bin/bash /start.sh",
+    "forwardPorts": [1433],
+    "containerEnv": {
+        "ACCEPT_EULA": "Y",
+        "MSSQL_PID": "Express",
+        "MSSQL_SA_PASSWORD": "ZenPassword123!"
+    },
+    "mounts": ["type=volume,source=dev-mssql-data,target=/var/opt/mssql"], 
+    "features": {
+        "ghcr.io/joshuanianji/devcontainer-features/gcloud-cli-persistence:1": {}
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-dotnettools.csharp"
+            ],
+            "settings": {
+                "files.exclude": {
+                    "**/.classpath": true,
+                    "**/.project": true,
+                    "**/.settings": true,
+                    "**/.factorypath": true,
+                    "**/.*": true,
+                    "**/bin": true,
+                    "**/obj": true,
+                    "nuget.config": true,
+                    "dev.sln": true,
+                    "global.json": true,
+                }
+            }
+        }
+    }
+}
+                """;
+
+        Path devcontainerJsonPath = devcontainerDir.resolve("devcontainer.json");
+        
+        // Only write file if content is different or file doesn't exist
+        if (shouldWriteFile(devcontainerJsonPath, devcontainerContent, updatedFiles, previewPath)) {
+            Files.write(devcontainerJsonPath, devcontainerContent.getBytes());
+            logger.debug("Created/updated devcontainer.json file: {}", devcontainerJsonPath);
+        } else {
+            logger.debug("devcontainer.json file content unchanged: {}", devcontainerJsonPath);
+        }
+    }
+
+    /**
+     * Creates a launch.json file for the preview project
+     */
+    private void createVSCodeLaunchFile(Path previewPath, Set<String> updatedFiles) throws IOException {
+        // Create .vscode directory if it doesn't exist
+        Path vscodeDir = previewPath.resolve(".vscode");
+        if (!Files.exists(vscodeDir)) {
+            Files.createDirectories(vscodeDir);
+            logger.debug("Created .vscode directory: {}", vscodeDir);
+        }
+
+        String launchContent = """
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Zen Start",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build zen app",
+      "program": "Zen.Blazor.Server.dll",
+      "args": [],
+      "stopAtEntry": false,
+      "console": "integratedTerminal",
+      "cwd": "/app"
+    }
+  ]
+}
+                """;
+
+        Path launchJsonPath = vscodeDir.resolve("launch.json");
+        
+        // Only write file if content is different or file doesn't exist
+        if (shouldWriteFile(launchJsonPath, launchContent, updatedFiles, previewPath)) {
+            Files.write(launchJsonPath, launchContent.getBytes());
+            logger.debug("Created/updated launch.json file: {}", launchJsonPath);
+        } else {
+            logger.debug("launch.json file content unchanged: {}", launchJsonPath);
+        }
+    }
+
+    /**
+     * Creates a tasks.json file for the preview project
+     */
+    private void createVSCodeTasksFile(Path previewPath, Set<String> updatedFiles) throws IOException {
+        // Create .vscode directory if it doesn't exist
+        Path vscodeDir = previewPath.resolve(".vscode");
+        if (!Files.exists(vscodeDir)) {
+            Files.createDirectories(vscodeDir);
+            logger.debug("Created .vscode directory: {}", vscodeDir);
+        }
+
+        String tasksContent = """
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build zen app",
+      "command": "dotnet",
+      "type": "process",
+      "args": [
+        "build",
+        "${workspaceFolder}/Zen.csproj",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary",
+        "/p:OutputPath=/app"
+      ],
+      "problemMatcher": "$msCompile",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "detail": "Builds Zen project."
+    }
+  ]
+}
+                """;
+
+        Path tasksJsonPath = vscodeDir.resolve("tasks.json");
+        
+        // Only write file if content is different or file doesn't exist
+        if (shouldWriteFile(tasksJsonPath, tasksContent, updatedFiles, previewPath)) {
+            Files.write(tasksJsonPath, tasksContent.getBytes());
+            logger.debug("Created/updated tasks.json file: {}", tasksJsonPath);
+        } else {
+            logger.debug("tasks.json file content unchanged: {}", tasksJsonPath);
+        }
     }
 
     /**
@@ -456,7 +673,7 @@ namespace Zen.Model
     private void ensureParentDockerfile(Path parentPath) throws IOException {
         Path dockerfilePath = parentPath.resolve("Dockerfile");
         String dockerfile = """
-        FROM myzen/devcontainer:11
+        FROM myzen/devcontainer:18
         WORKDIR /workspace
         COPY nuget.config .
         COPY Zen.csproj .
@@ -561,12 +778,13 @@ namespace Zen.Model
     /**
      * Attempts to checkout a project from GitHub if it exists
      * @param projectId The project identifier
+     * @param previewPath
      * @return true if project was successfully checked out, false otherwise
      */
-    private boolean checkoutProjectFromGitHub(String projectId) {
+    private boolean checkoutProjectFromGitHub(String projectId, Path previewPath) {
         try {
-            gitHubService.createRepository(projectId);
-            logger.info("Successfully checked out project from GitHub: {}", projectId);
+            gitHubService.createRepository(projectId, previewPath);
+            logger.info("Successfully checked out project from GitHub to: {}", previewPath);
             return true;
         } catch (Exception e) {
             logger.info("Project {} does not exist on GitHub or failed to checkout: {}", projectId, e.getMessage());
@@ -578,48 +796,43 @@ namespace Zen.Model
      * Commits and pushes changes to GitHub repository
      * @param projectId The project identifier
      * @param firestoreDocumentId The Firestore document ID for context
+     * @param previewPath
+     * @param updatedFiles Set of files that were actually updated (relative paths)
      */
-    private void commitAndPushChanges(String projectId, String firestoreDocumentId) {
+    private void commitAndPushChanges(String projectId, String firestoreDocumentId, Path previewPath, Set<String> updatedFiles) {
         try {
-            Path previewPath = getPreviewPath(projectId);
+            // Only collect files that were actually updated
+            Map<String, String> filesToCommit = new HashMap<>();
             
-            // Collect all model files for merging
-            Map<String, String> modelFiles = new HashMap<>();
-            Path modelPath = previewPath.resolve("Model");
+            logger.info("Committing {} updated files for project {}: {}", updatedFiles.size(), projectId, updatedFiles);
             
-            if (Files.exists(modelPath)) {
-                Files.walk(modelPath)
-                    .filter(Files::isRegularFile)
-                    .filter(path -> path.toString().endsWith(".cs"))
-                    .forEach(path -> {
-                        try {
-                            String relativePath = previewPath.relativize(path).toString();
-                            String content = Files.readString(path);
-                            modelFiles.put(relativePath, content);
-                        } catch (IOException e) {
-                            logger.warn("Failed to read file for commit: {}", path, e);
-                        }
-                    });
+            for (String relativePath : updatedFiles) {
+                Path filePath = previewPath.resolve(relativePath);
+                if (Files.exists(filePath)) {
+                    try {
+                        String content = Files.readString(filePath);
+                        filesToCommit.put(relativePath, content);
+                        logger.debug("Added updated file to commit: {}", relativePath);
+                    } catch (IOException e) {
+                        logger.warn("Failed to read updated file for commit: {}", filePath, e);
+                    }
+                } else {
+                    logger.warn("Updated file no longer exists: {}", filePath);
+                }
             }
             
-            // Include project files if they exist
-            Path csprojPath = previewPath.resolve("Zen.csproj");
-            if (Files.exists(csprojPath)) {
-                modelFiles.put("Zen.csproj", Files.readString(csprojPath));
+            if (filesToCommit.isEmpty()) {
+                logger.info("No valid files to commit for project: {}", projectId);
+                return;
             }
             
-            Path nugetConfigPath = previewPath.resolve("nuget.config");
-            if (Files.exists(nugetConfigPath)) {
-                modelFiles.put("nuget.config", Files.readString(nugetConfigPath));
-            }
+            // Merge only the updated files and push changes
+            gitHubService.mergeFiles(projectId, filesToCommit, previewPath);
+            String commitMessage = String.format("Updated %d files for preview at %s", filesToCommit.size(), firestoreDocumentId);
+            gitHubService.pushChanges(projectId, commitMessage, previewPath);
             
-            // Merge files and push changes
-            gitHubService.mergeFiles(projectId, modelFiles);
-            String commitMessage = "Commit for preview at " + firestoreDocumentId;
-            gitHubService.pushChanges(projectId, commitMessage);
-            
-            logger.info("Successfully committed and pushed changes for project: {} (preview for doc: {})", 
-                       projectId, firestoreDocumentId);
+            logger.info("Successfully committed and pushed {} updated files for project: {} (preview for doc: {})", 
+                       filesToCommit.size(), projectId, firestoreDocumentId);
             
         } catch (Exception e) {
             logger.error("Failed to commit and push changes for project: {}", projectId, e);
