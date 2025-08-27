@@ -42,7 +42,7 @@ public class GitHubService {
         }
 
         Git.cloneRepository()
-                .setURI("https://github.com/" + githubUsername + "/" + repoName + ".git")
+                .setURI("https://github.com/" + githubUsername + "/myzen-" + repoName + ".git")
                 .setDirectory(workingDirectory.toFile())
                 .setCredentialsProvider(new UsernamePasswordCredentialsProvider(githubToken, ""))
                 .call();
