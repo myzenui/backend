@@ -420,7 +420,7 @@ namespace Zen.Model
 
         String devcontainerContent = """
 {
-    "image": "myzen/devcontainer:18",
+    "image": "myzen/devcontainer:19",
     "postStartCommand": "/bin/bash /start.sh",
     "forwardPorts": [1433],
     "containerEnv": {
@@ -673,7 +673,7 @@ namespace Zen.Model
     private void ensureParentDockerfile(Path parentPath) throws IOException {
         Path dockerfilePath = parentPath.resolve("Dockerfile");
         String dockerfile = """
-        FROM myzen/devcontainer:18
+        FROM myzen/devcontainer:19
         WORKDIR /workspace
         COPY nuget.config .
         COPY Zen.csproj .

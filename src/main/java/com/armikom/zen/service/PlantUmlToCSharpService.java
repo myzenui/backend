@@ -33,6 +33,7 @@ public class PlantUmlToCSharpService {
     private String generateCSharpClass(UmlClass umlClass) {
         StringBuilder sb = new StringBuilder();
         sb.append("using DevExpress.Persistent.Base;\n");
+        sb.append("using Microsoft.EntityFrameworkCore;\n");
         sb.append("using System;\n");
         sb.append("using System.Collections.Generic;\n");
         sb.append("using System.Collections.ObjectModel;\n");
@@ -55,6 +56,11 @@ public class PlantUmlToCSharpService {
         for (UmlRelationship relationship : umlClass.relationships) {
             String targetType = relationship.targetClass;
             String propertyName = relationship.propertyName;
+
+            // Add DeleteBehavior attribute for non-collection relationships (foreign key side)
+            if (!relationship.isCollection) {
+                sb.append("        [DeleteBehavior(DeleteBehavior.Restrict)]\n");
+            }
 
             // Add InverseProperty attribute if inverse property name is specified
             if (relationship.inversePropertyName != null && !relationship.inversePropertyName.isEmpty()) {
@@ -283,30 +289,39 @@ public class PlantUmlToCSharpService {
         sb.append("            base.OnModelCreating(modelBuilder);\n\n");
         
         // Configure relationships with NO ACTION delete behavior
-        for (UmlClass umlClass : uniqueList) {
-            for (UmlRelationship relationship : umlClass.relationships) {
-                if (!relationship.isCollection) {
-                    // One-to-one or many-to-one relationship
-                    sb.append("            modelBuilder.Entity<").append(umlClass.name).append(">()\n");
-                    sb.append("                .HasOne(x => x.").append(relationship.propertyName).append(")\n");
-                    
-                    // Check if the target class has a corresponding collection property
-                    UmlClass targetClass = findClassByName(uniqueList, relationship.targetClass);
-                    if (targetClass != null && relationship.inversePropertyName != null && !relationship.inversePropertyName.isEmpty()) {
-                        UmlRelationship inverseRel = findRelationshipByProperty(targetClass, relationship.inversePropertyName);
-                        if (inverseRel != null && inverseRel.isCollection) {
-                            sb.append("                .WithMany(x => x.").append(relationship.inversePropertyName).append(")\n");
+        if (false) { // Intentionally disabled - keeping existing relationship configuration code for reference
+            for (UmlClass umlClass : uniqueList) {
+                for (UmlRelationship relationship : umlClass.relationships) {
+                    if (!relationship.isCollection) {
+                        // One-to-one or many-to-one relationship
+                        sb.append("            modelBuilder.Entity<").append(umlClass.name).append(">()\n");
+                        sb.append("                .HasOne(x => x.").append(relationship.propertyName).append(")\n");
+                        
+                        // Check if the target class has a corresponding collection property
+                        UmlClass targetClass = findClassByName(uniqueList, relationship.targetClass);
+                        if (targetClass != null && relationship.inversePropertyName != null && !relationship.inversePropertyName.isEmpty()) {
+                            UmlRelationship inverseRel = findRelationshipByProperty(targetClass, relationship.inversePropertyName);
+                            if (inverseRel != null && inverseRel.isCollection) {
+                                sb.append("                .WithMany(x => x.").append(relationship.inversePropertyName).append(")\n");
+                            } else {
+                                sb.append("                .WithOne(x => x.").append(relationship.inversePropertyName).append(")\n");
+                            }
                         } else {
-                            sb.append("                .WithOne(x => x.").append(relationship.inversePropertyName).append(")\n");
+                            sb.append("                .WithMany()\n");
                         }
-                    } else {
-                        sb.append("                .WithMany()\n");
+                        
+                        sb.append("                .OnDelete(DeleteBehavior.NoAction);\n\n");
                     }
-                    
-                    sb.append("                .OnDelete(DeleteBehavior.NoAction);\n\n");
                 }
             }
         }
+        
+        // Set DeleteBehavior.NoAction for all foreign keys
+        sb.append("            foreach (var relationship in modelBuilder.Model.GetEntityTypes()\n");
+        sb.append("                             .SelectMany(e => e.GetForeignKeys()))\n");
+        sb.append("            {\n");
+        sb.append("                relationship.DeleteBehavior = DeleteBehavior.NoAction;\n");
+        sb.append("            }\n");
         
         sb.append("        }\n");
         sb.append("    }\n");
