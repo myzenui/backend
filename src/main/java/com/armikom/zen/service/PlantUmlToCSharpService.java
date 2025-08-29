@@ -35,7 +35,8 @@ public class PlantUmlToCSharpService {
         sb.append("using DevExpress.Persistent.Base;\n");
         sb.append("using System;\n");
         sb.append("using System.Collections.Generic;\n");
-        sb.append("using System.Collections.ObjectModel;\n\n");
+        sb.append("using System.Collections.ObjectModel;\n");
+        sb.append("using System.ComponentModel.DataAnnotations.Schema;\n\n");
 
         sb.append("namespace Zen.Model\n");
         sb.append("{\n\n");
@@ -54,6 +55,11 @@ public class PlantUmlToCSharpService {
         for (UmlRelationship relationship : umlClass.relationships) {
             String targetType = relationship.targetClass;
             String propertyName = relationship.propertyName;
+
+            // Add InverseProperty attribute if inverse property name is specified
+            if (relationship.inversePropertyName != null && !relationship.inversePropertyName.isEmpty()) {
+                sb.append("        [InverseProperty(\"").append(relationship.inversePropertyName).append("\")]\n");
+            }
 
             if (relationship.isCollection) {
                 sb.append("        public virtual IList<").append(targetType).append("> ").append(propertyName)
@@ -143,9 +149,9 @@ public class PlantUmlToCSharpService {
                     class2Collection = false;
                 }
 
-                // Add relationships using the property names from the labels
-                class1.addRelationship(new UmlRelationship(leftPropertyName, class2Name, class1Collection));
-                class2.addRelationship(new UmlRelationship(rightPropertyName, class1Name, class2Collection));
+                // Add relationships using the property names from the labels with inverse property references
+                class1.addRelationship(new UmlRelationship(leftPropertyName, class2Name, class1Collection, rightPropertyName));
+                class2.addRelationship(new UmlRelationship(rightPropertyName, class1Name, class2Collection, leftPropertyName));
                 continue;
             }
             
@@ -166,8 +172,8 @@ public class PlantUmlToCSharpService {
                 String leftProp = leftLabel.trim().replaceFirst("^\\*\\s*", "");
                 String rightProp = rightLabel.trim().replaceFirst("^\\*\\s*", "");
 
-                class1.addRelationship(new UmlRelationship(rightProp, class2Name, rightCollection));
-                class2.addRelationship(new UmlRelationship(leftProp, class1Name, leftCollection));
+                class1.addRelationship(new UmlRelationship(rightProp, class2Name, rightCollection, leftProp));
+                class2.addRelationship(new UmlRelationship(leftProp, class1Name, leftCollection, rightProp));
                 continue;
             }
 
@@ -200,8 +206,8 @@ public class PlantUmlToCSharpService {
                 String prop1 = class1Collection ? pluralize(class2Name) : class2Name;
                 String prop2 = class2Collection ? pluralize(class1Name) : class1Name;
 
-                class1.addRelationship(new UmlRelationship(prop1, class2Name, class1Collection));
-                class2.addRelationship(new UmlRelationship(prop2, class1Name, class2Collection));
+                class1.addRelationship(new UmlRelationship(prop1, class2Name, class1Collection, prop2));
+                class2.addRelationship(new UmlRelationship(prop2, class1Name, class2Collection, prop1));
             }
         }
     }
@@ -271,10 +277,56 @@ public class PlantUmlToCSharpService {
               .append(pluralize(umlClass.name)).append(" { get; set; }\n");
         }
         
+        sb.append("\n");
+        sb.append("        protected override void OnModelCreating(ModelBuilder modelBuilder)\n");
+        sb.append("        {\n");
+        sb.append("            base.OnModelCreating(modelBuilder);\n\n");
+        
+        // Configure relationships with NO ACTION delete behavior
+        for (UmlClass umlClass : uniqueList) {
+            for (UmlRelationship relationship : umlClass.relationships) {
+                if (!relationship.isCollection) {
+                    // One-to-one or many-to-one relationship
+                    sb.append("            modelBuilder.Entity<").append(umlClass.name).append(">()\n");
+                    sb.append("                .HasOne(x => x.").append(relationship.propertyName).append(")\n");
+                    
+                    // Check if the target class has a corresponding collection property
+                    UmlClass targetClass = findClassByName(uniqueList, relationship.targetClass);
+                    if (targetClass != null && relationship.inversePropertyName != null && !relationship.inversePropertyName.isEmpty()) {
+                        UmlRelationship inverseRel = findRelationshipByProperty(targetClass, relationship.inversePropertyName);
+                        if (inverseRel != null && inverseRel.isCollection) {
+                            sb.append("                .WithMany(x => x.").append(relationship.inversePropertyName).append(")\n");
+                        } else {
+                            sb.append("                .WithOne(x => x.").append(relationship.inversePropertyName).append(")\n");
+                        }
+                    } else {
+                        sb.append("                .WithMany()\n");
+                    }
+                    
+                    sb.append("                .OnDelete(DeleteBehavior.NoAction);\n\n");
+                }
+            }
+        }
+        
+        sb.append("        }\n");
         sb.append("    }\n");
         sb.append("}\n");
         
         return sb.toString();
+    }
+
+    private UmlClass findClassByName(List<UmlClass> classes, String className) {
+        return classes.stream()
+                .filter(c -> c.name.equals(className))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private UmlRelationship findRelationshipByProperty(UmlClass umlClass, String propertyName) {
+        return umlClass.relationships.stream()
+                .filter(r -> r.propertyName.equals(propertyName))
+                .findFirst()
+                .orElse(null);
     }
 
     private static class UmlClass {
@@ -324,11 +376,13 @@ public class PlantUmlToCSharpService {
         String propertyName;
         String targetClass;
         boolean isCollection;
+        String inversePropertyName;
 
-        UmlRelationship(String propertyName, String targetClass, boolean isCollection) {
+        UmlRelationship(String propertyName, String targetClass, boolean isCollection, String inversePropertyName) {
             this.propertyName = propertyName;
             this.targetClass = targetClass;
             this.isCollection = isCollection;
+            this.inversePropertyName = inversePropertyName;
         }
     }
 }

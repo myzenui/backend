@@ -4,8 +4,8 @@
 
 ### Variables
 @baseUrl = http://localhost:8080/api/database
-@testDbName = tour-buddy
-@testUsername = tour-buddy
+@testDbName = armikom
+@testUsername = armikom
 @testPassword = MyZen25!17044b79e9bf3fe4
 @backupPath = /tmp/backup_testdb.sql
 
