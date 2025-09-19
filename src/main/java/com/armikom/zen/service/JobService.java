@@ -315,8 +315,9 @@ public class JobService {
                 throw new InterruptedException("Preview job processing was cancelled");
             }
 
-            // Generate preview using PreviewService
-            boolean success = previewService.generatePreview(job.getProjectId(), plantUml);
+            // Generate preview using PreviewService with buffered Firestore logging
+            IJobLog jobLog = new JobLog(firestore, job.getId());
+            boolean success = previewService.generatePreview(job.getProjectId(), plantUml, jobLog);
             if (success) {
                 String previewLocation = previewService.getPreviewLocation(job.getProjectId());
                 updateJobStatus(job.getId(), "completed", "Preview generated at: " + previewLocation);

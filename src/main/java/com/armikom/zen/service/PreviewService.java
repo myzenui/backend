@@ -61,82 +61,118 @@ public class PreviewService {
      * @return true if preview generation and build was successful, false otherwise
      */
     public boolean generatePreview(String firestoreDocumentId, String plantUml) {
-        if (firestoreDocumentId == null || firestoreDocumentId.trim().isEmpty()) {
-            logger.error("Firestore document id cannot be null or empty");
-            return false;
-        }
+        return generatePreview(firestoreDocumentId, plantUml, null);
+    }
 
-        if (plantUml == null || plantUml.trim().isEmpty()) {
-            logger.error("PlantUML content cannot be null or empty");
-            return false;
-        }
-
+    /**
+     * Generates model files to a preview folder and triggers Docker build
+     * Logs progress to the provided IJobLog (if not null), consolidating writes.
+     */
+    public boolean generatePreview(String firestoreDocumentId, String plantUml, IJobLog jobLog) {
         try {
+            if (firestoreDocumentId == null || firestoreDocumentId.trim().isEmpty()) {
+                logger.error("Firestore document id cannot be null or empty");
+                if (jobLog != null) jobLog.log("ERROR", "Firestore document id cannot be null or empty");
+                return false;
+            }
+
+            if (plantUml == null || plantUml.trim().isEmpty()) {
+                logger.error("PlantUML content cannot be null or empty");
+                if (jobLog != null) jobLog.log("ERROR", "PlantUML content cannot be null or empty");
+                return false;
+            }
+
             // Extract project id from firestore document field `id`
             String projectId = extractProjectIdFromFirestore(firestoreDocumentId);
             if (projectId == null || projectId.trim().isEmpty()) {
                 logger.error("Project id not found in Firestore document: {}", firestoreDocumentId);
+                if (jobLog != null) jobLog.log("ERROR", "Project id not found for document: " + firestoreDocumentId);
                 return false;
             }
 
+            if (jobLog != null) jobLog.log("INFO", "Starting preview for project " + projectId);
             logger.info("Starting preview generation for projectId: {} (doc: {})", projectId, firestoreDocumentId);
 
             // Try to checkout project from GitHub if it exists
             Path previewPath = getPreviewPath(projectId);
             boolean projectCheckedOut = checkoutProjectFromGitHub(projectId, previewPath);
+            if (jobLog != null) {
+                jobLog.log("INFO", projectCheckedOut ?
+                        "Checked out project repo to " + previewPath :
+                        "No GitHub repo found. Generating preview from scratch at " + previewPath);
+            }
             
             // Generate model files from PlantUML
+            if (jobLog != null) jobLog.log("INFO", "Generating model files from PlantUML");
             Map<String, String> generatedFiles = plantUmlToCSharpService.generate(plantUml);
             if (generatedFiles.isEmpty()) {
                 logger.error("No files generated from PlantUML for project: {}", projectId);
+                if (jobLog != null) jobLog.log("ERROR", "No files were generated from PlantUML");
                 return false;
             }
 
             // Create preview folder and write files
+            if (jobLog != null) jobLog.log("INFO", "Creating preview files");
             Set<String> updatedFiles = createPreviewFiles(projectId, generatedFiles, projectCheckedOut);
             if (updatedFiles == null) {
                 logger.error("Failed to create preview files for project: {}", projectId);
+                if (jobLog != null) jobLog.log("ERROR", "Failed to create preview files");
                 return false;
             }
+            if (jobLog != null) jobLog.log("INFO", "Files prepared. Updated files: " + updatedFiles.size());
 
             // Trigger Docker build
+            if (jobLog != null) jobLog.log("INFO", "Building project with Docker");
             if (!buildWithDocker(projectId)) {
                 logger.error("Failed to build project with Docker for project: {}", projectId);
+                if (jobLog != null) jobLog.log("ERROR", "Docker build failed");
                 return false;
             }
+            if (jobLog != null) jobLog.log("INFO", "Docker build succeeded");
 
             // Build docker image for the generated project and tag as myzen/<projectId>
+            if (jobLog != null) jobLog.log("INFO", "Building runnable Docker image myzen/" + projectId);
             if (!buildProjectImage(projectId)) {
                 logger.error("Failed to build docker image for project: {}", projectId);
+                if (jobLog != null) jobLog.log("ERROR", "Failed to build Docker image");
                 return false;
             }
+            if (jobLog != null) jobLog.log("INFO", "Docker image built successfully");
 
             // If model has been changed and preview docker builds succeeded, commit and push changes
             if (projectCheckedOut && !updatedFiles.isEmpty()) {
                 try {
+                    if (jobLog != null) jobLog.log("INFO", "Committing and pushing updated files to repository");
                     commitAndPushChanges(projectId, firestoreDocumentId, previewPath, updatedFiles);
                 } catch (Exception e) {
                     logger.warn("Failed to commit and push changes for project {}: {}", projectId, e.getMessage());
+                    if (jobLog != null) jobLog.log("WARN", "Failed to commit/push changes: " + e.getMessage());
                     // Don't fail the entire preview generation if git push fails
                 }
             } else if (projectCheckedOut) {
                 logger.info("No files were updated for project {}, skipping git commit/push", projectId);
+                if (jobLog != null) jobLog.log("INFO", "No file changes to commit");
             }
 
             // Create (or ensure) database for the project using projectId for db/user/password
             try {
+                if (jobLog != null) jobLog.log("INFO", "Ensuring database for preview");
                 boolean dbOk = databaseService.createDatabase(DatabaseEnvironment.PREVIEW,projectId, projectId, generatePassword(projectId));
                 if (!dbOk) {
                     logger.error("Failed to create database for project: {}", projectId);
+                    if (jobLog != null) jobLog.log("ERROR", "Failed to create/ensure database");
                     return false;
                 }
                 logger.info("Database created/ensured for project: {}", projectId);
+                if (jobLog != null) jobLog.log("INFO", "Database ready");
             } catch (Exception dbEx) {
                 logger.error("Database creation failed for project: {}", projectId, dbEx);
+                if (jobLog != null) jobLog.log("ERROR", "Database setup failed: " + dbEx.getMessage());
                 return false;
             }
 
             // Replace existing container (if any) and run a new one on `myzen` network
+            if (jobLog != null) jobLog.log("INFO", "Replacing and starting preview container");
             replaceAndRunContainer(projectId);
 
             // Configure Cloudflare: myzen-<projectId>.armikom.com -> http://<projectId>:5000
@@ -146,19 +182,28 @@ public class PreviewService {
                 var cfResp = cloudflareService.createCompleteRoute(dnsName, 5000, "http", null, containerName);
                 if (!cfResp.isSuccess()) {
                     logger.warn("Cloudflare route setup reported failure: {}", cfResp.getMessage());
+                    if (jobLog != null) jobLog.log("WARN", "Cloudflare route setup reported failure: " + cfResp.getMessage());
                 } else {
                     logger.info("Cloudflare route configured for {} -> http://{}:5000", dnsName, containerName);
+                    if (jobLog != null) jobLog.log("INFO", "Cloudflare route configured: " + dnsName);
                 }
             } catch (Exception e) {
                 logger.warn("Failed to configure Cloudflare route for project {}: {}", projectId, e.getMessage());
+                if (jobLog != null) jobLog.log("WARN", "Failed to configure Cloudflare: " + e.getMessage());
             }
 
             logger.info("Preview generation completed successfully for project: {}", projectId);
+            if (jobLog != null) jobLog.log("INFO", "Preview generation completed successfully");
             return true;
 
         } catch (Exception e) {
             logger.error("Error during preview generation", e);
+            if (jobLog != null) jobLog.log("ERROR", "Error during preview generation: " + e.getMessage());
             return false;
+        } finally {
+            if (jobLog != null) {
+                try { jobLog.close(); } catch (Exception ignore) { }
+            }
         }
     }
 
