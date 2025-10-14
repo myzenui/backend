@@ -465,7 +465,7 @@ namespace Zen.Model
 
         String devcontainerContent = """
 {
-    "image": "myzen/devcontainer:19",
+    "image": "myzen/devcontainer:23",
     "postStartCommand": "/bin/bash /start.sh",
     "forwardPorts": [1433],
     "containerEnv": {
@@ -480,7 +480,8 @@ namespace Zen.Model
     "customizations": {
         "vscode": {
             "extensions": [
-                "ms-dotnettools.csharp"
+                "ms-dotnettools.csharp",
+                "mtxr.sqltools-driver-mssql"
             ],
             "settings": {
                 "files.exclude": {
@@ -494,7 +495,26 @@ namespace Zen.Model
                     "nuget.config": true,
                     "dev.sln": true,
                     "global.json": true,
-                }
+                },
+                "sqltools.connections": [
+                    {
+                        "connectionTimeout": 15,
+                        "mssqlOptions": {
+                            "appName": "SQLTools",
+                            "useUTC": true,
+                            "encrypt": true,
+                            "trustServerCertificate": true
+                        },
+                        "ssh": "Disabled",
+                        "previewLimit": 50,
+                        "server": "localhost",
+                        "port": 1433,
+                        "driver": "MSSQL",
+                        "name": "local",
+                        "username": "sa",
+                        "password": "ZenPassword123!"
+                    }
+                ]
             }
         }
     }
@@ -718,7 +738,7 @@ namespace Zen.Model
     private void ensureParentDockerfile(Path parentPath) throws IOException {
         Path dockerfilePath = parentPath.resolve("Dockerfile");
         String dockerfile = """
-        FROM myzen/devcontainer:19
+        FROM myzen/devcontainer:23
         WORKDIR /workspace
         COPY nuget.config .
         COPY Zen.csproj .
