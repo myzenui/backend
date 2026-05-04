@@ -9,6 +9,7 @@ import com.google.cloud.firestore.Query;
 import com.google.cloud.firestore.QueryDocumentSnapshot;
 import com.google.cloud.firestore.QuerySnapshot;
 import com.google.firebase.FirebaseApp;
+import com.armikom.zen.enums.DatabaseEnvironment;
 import com.armikom.zen.model.Job;
 import com.armikom.zen.model.Project;
 import org.slf4j.Logger;
@@ -39,6 +40,7 @@ public class JobService {
     private final ProjectService projectService;
     private final PreviewService previewService;
     private final AIService aiService;
+    private final DatabaseService databaseService;
     private final FirebaseApp firebaseApp;
     private final Firestore firestore;
 
@@ -57,11 +59,13 @@ public class JobService {
             ProjectService projectService,
             PreviewService previewService,
             AIService aiService,
+            DatabaseService databaseService,
             FirebaseApp firebaseApp,
             Firestore firestore) {
         this.projectService = projectService;
         this.previewService = previewService;
         this.aiService = aiService;
+        this.databaseService = databaseService;
         this.firebaseApp = firebaseApp;
         this.firestore = firestore;
     }
@@ -216,6 +220,8 @@ public class JobService {
                 processGenerateJob(job);
             } else if ("preview".equals(job.getType())) {
                 processPreviewJob(job);
+            } else if ("reset_database".equals(job.getType())) {
+                processResetDatabaseJob(job);
             } else {
                 logger.warn("Unknown job type: {}", job.getType());
                 updateJobStatus(job.getId(), "failed", "Unknown job type");
@@ -335,6 +341,86 @@ public class JobService {
             logger.error("Error processing preview job: {}", job.getId(), e);
             updateJobStatus(job.getId(), "failed", "Error: " + e.getMessage());
         }
+    }
+
+    private void processResetDatabaseJob(Job job) {
+        IJobLog jobLog = new JobLog(firestore, job.getId());
+        try {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedException("Reset database job was cancelled");
+            }
+
+            logger.info("Processing reset_database job: {}", job.getId());
+            jobLog.log("INFO", "Starting database reset for project " + job.getProjectId());
+
+            // Resolve the actual project id (database name) from the Firestore document
+            String projectId = resolveProjectId(job.getProjectId());
+            if (projectId == null || projectId.trim().isEmpty()) {
+                logger.error("Could not resolve project id for reset_database job {}: firestoreDocId={}",
+                        job.getId(), job.getProjectId());
+                jobLog.log("ERROR", "Could not resolve project id");
+                updateJobStatus(job.getId(), "failed", "Could not resolve project id");
+                return;
+            }
+
+            // Drop all tables so EF Core migrations can re-create them cleanly
+            jobLog.log("INFO", "Dropping all tables in database: " + projectId);
+            boolean dropped = databaseService.dropAllTables(DatabaseEnvironment.PREVIEW, projectId);
+            if (!dropped) {
+                jobLog.log("ERROR", "Failed to drop tables in database: " + projectId);
+                updateJobStatus(job.getId(), "failed", "Failed to drop database tables");
+                return;
+            }
+            jobLog.log("INFO", "All tables dropped successfully");
+
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedException("Reset database job was cancelled");
+            }
+
+            // Restart the preview container so EF Core migrations run from scratch
+            jobLog.log("INFO", "Restarting preview container for project: " + projectId);
+            boolean restarted = previewService.restartContainer(projectId);
+            if (!restarted) {
+                jobLog.log("WARN", "Container restart failed or container not found. A fresh preview deployment may be needed.");
+            } else {
+                jobLog.log("INFO", "Preview container restarted — migrations will run on startup");
+            }
+
+            updateJobStatus(job.getId(), "completed", "Database reset completed successfully");
+            jobLog.log("INFO", "Database reset completed successfully");
+            logger.info("Reset database job completed for job: {}", job.getId());
+
+        } catch (InterruptedException e) {
+            logger.info("Reset database job was interrupted: {}", job.getId());
+            updateJobStatus(job.getId(), "cancelled", "Job was cancelled");
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            logger.error("Error processing reset_database job: {}", job.getId(), e);
+            jobLog.log("ERROR", "Error during database reset: " + e.getMessage());
+            updateJobStatus(job.getId(), "failed", "Error: " + e.getMessage());
+        } finally {
+            try { jobLog.close(); } catch (Exception ignore) { }
+        }
+    }
+
+    /**
+     * Resolves the actual project id (used as database name) from the Firestore project document's
+     * `id` field. Falls back to the Firestore document id if the field is absent.
+     */
+    private String resolveProjectId(String firestoreDocumentId) {
+        try {
+            DocumentReference ref = firestore.collection("projects").document(firestoreDocumentId);
+            com.google.cloud.firestore.DocumentSnapshot snap = ref.get().get();
+            if (snap.exists()) {
+                Object value = snap.get("id");
+                if (value != null) {
+                    return String.valueOf(value).trim();
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to resolve project id from Firestore for doc {}: {}", firestoreDocumentId, e.getMessage());
+        }
+        return firestoreDocumentId;
     }
 
     private void updateProjectBusinessModel(String projectId, String plantUmlDiagram) {

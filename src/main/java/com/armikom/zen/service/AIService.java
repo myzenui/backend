@@ -66,7 +66,7 @@ public class AIService {
                 15. In one to many relationships, put the one property like "WorkAt: Company" in the example.
 
                 Here is the project description:
-                %s
+                %sx
 
                 Example of PlantUML syntax for class diagrams:
 

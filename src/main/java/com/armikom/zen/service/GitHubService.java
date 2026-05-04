@@ -33,12 +33,32 @@ public class GitHubService {
     }
 
     public void createRepository(String repoName, Path workingDirectory) throws GitAPIException, IOException {
-        // Create a new repository on GitHub (this part requires GitHub API, not JGit)
-        // For this example, we assume the repository is already created and empty.
+        Path gitDir = workingDirectory.resolve(".git");
 
-        // delete all files at the directory recursively if exists
+        if (Files.isDirectory(gitDir)) {
+            log.info("Existing repo found at {}. Pulling latest changes.", workingDirectory);
+            try (Git git = Git.open(workingDirectory.toFile())) {
+                git.pull()
+                        .setCredentialsProvider(new UsernamePasswordCredentialsProvider(githubToken, ""))
+                        .call();
+            }
+            log.info("Pull completed for {}", workingDirectory);
+            return;
+        }
+
         if (Files.exists(workingDirectory)) {
-            FileUtils.deleteDirectory(workingDirectory.toFile());
+            try {
+                ProcessBuilder pb = new ProcessBuilder("sudo", "rm", "-rf", workingDirectory.toString());
+                pb.redirectErrorStream(true);
+                int exitCode = pb.start().waitFor();
+                if (exitCode != 0) {
+                    throw new IOException("Failed to delete directory with sudo: " + workingDirectory);
+                }
+                log.info("Deleted existing non-git directory using sudo: {}", workingDirectory);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while deleting directory: " + workingDirectory, e);
+            }
         }
 
         Git.cloneRepository()

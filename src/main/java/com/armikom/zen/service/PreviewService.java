@@ -101,25 +101,37 @@ public class PreviewService {
                         "Checked out project repo to " + previewPath :
                         "No GitHub repo found. Generating preview from scratch at " + previewPath);
             }
-            
-            // Generate model files from PlantUML
-            if (jobLog != null) jobLog.log("INFO", "Generating model files from PlantUML");
-            Map<String, String> generatedFiles = plantUmlToCSharpService.generate(plantUml);
-            if (generatedFiles.isEmpty()) {
-                logger.error("No files generated from PlantUML for project: {}", projectId);
-                if (jobLog != null) jobLog.log("ERROR", "No files were generated from PlantUML");
-                return false;
-            }
 
-            // Create preview folder and write files
-            if (jobLog != null) jobLog.log("INFO", "Creating preview files");
-            Set<String> updatedFiles = createPreviewFiles(projectId, generatedFiles, projectCheckedOut);
-            if (updatedFiles == null) {
-                logger.error("Failed to create preview files for project: {}", projectId);
-                if (jobLog != null) jobLog.log("ERROR", "Failed to create preview files");
-                return false;
+            // If project has .git and model.lock, user has manually modified model files — skip code generation
+            boolean modelLocked = Files.isDirectory(previewPath.resolve(".git"))
+                    && Files.exists(previewPath.resolve("model.lock"));
+
+            Set<String> updatedFiles;
+
+            if (modelLocked) {
+                logger.info("model.lock detected for project {}. Skipping UML code generation.", projectId);
+                if (jobLog != null) jobLog.log("INFO", "model.lock found — skipping code generation from UML model");
+                updatedFiles = new HashSet<>();
+            } else {
+                // Generate model files from PlantUML
+                if (jobLog != null) jobLog.log("INFO", "Generating model files from PlantUML");
+                Map<String, String> generatedFiles = plantUmlToCSharpService.generate(plantUml);
+                if (generatedFiles.isEmpty()) {
+                    logger.error("No files generated from PlantUML for project: {}", projectId);
+                    if (jobLog != null) jobLog.log("ERROR", "No files were generated from PlantUML");
+                    return false;
+                }
+
+                // Create preview folder and write files
+                if (jobLog != null) jobLog.log("INFO", "Creating preview files");
+                updatedFiles = createPreviewFiles(projectId, generatedFiles, projectCheckedOut);
+                if (updatedFiles == null) {
+                    logger.error("Failed to create preview files for project: {}", projectId);
+                    if (jobLog != null) jobLog.log("ERROR", "Failed to create preview files");
+                    return false;
+                }
+                if (jobLog != null) jobLog.log("INFO", "Files prepared. Updated files: " + updatedFiles.size());
             }
-            if (jobLog != null) jobLog.log("INFO", "Files prepared. Updated files: " + updatedFiles.size());
 
             // Trigger Docker build
             if (jobLog != null) jobLog.log("INFO", "Building project with Docker");
@@ -372,7 +384,9 @@ public class PreviewService {
 
   <ItemGroup>
     <PackageReference Include="DevExpress.ExpressApp" Version="24.2.6" />
+    <PackageReference Include="DevExpress.ExpressApp.ConditionalAppearance" Version="24.2.6" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.11" />
   </ItemGroup>
 
 </Project>
@@ -465,7 +479,7 @@ namespace Zen.Model
 
         String devcontainerContent = """
 {
-    "image": "myzen/devcontainer:23",
+    "image": "${DOCKER_IMAGE}",
     "postStartCommand": "/bin/bash /start.sh",
     "forwardPorts": [1433],
     "containerEnv": {
@@ -519,7 +533,7 @@ namespace Zen.Model
         }
     }
 }
-                """;
+                """.replace("${DOCKER_IMAGE}", previewDockerImage);
 
         Path devcontainerJsonPath = devcontainerDir.resolve("devcontainer.json");
         
@@ -634,7 +648,7 @@ namespace Zen.Model
 
         try {
             Path previewPath = getPreviewPath(projectName);
-            logger.info("Building project with Docker image: {} at path: {}", "myzen/devcontainer", previewPath);
+            logger.info("Building project with Docker image: {} at path: {}", previewDockerImage, previewPath);
 
             // Build the project using Docker
             ProcessBuilder processBuilder = new ProcessBuilder(
@@ -738,7 +752,7 @@ namespace Zen.Model
     private void ensureParentDockerfile(Path parentPath) throws IOException {
         Path dockerfilePath = parentPath.resolve("Dockerfile");
         String dockerfile = """
-        FROM myzen/devcontainer:23
+        FROM ${DOCKER_IMAGE}
         WORKDIR /workspace
         COPY nuget.config .
         COPY Zen.csproj .
@@ -746,7 +760,7 @@ namespace Zen.Model
         COPY . .
         RUN dotnet publish Zen.csproj -o /app
         WORKDIR /app
-        """;
+        """.replace("${DOCKER_IMAGE}", previewDockerImage);
         Files.writeString(dockerfilePath, dockerfile);
         logger.info("Created Dockerfile at {}", dockerfilePath);
     }
@@ -797,6 +811,38 @@ namespace Zen.Model
             }
         } catch (Exception e) {
             logger.error("Failed to run container for project {}", projectId, e);
+        }
+    }
+
+    /**
+     * Restarts the preview container for a project so that EF Core migrations re-run from scratch.
+     * @param projectId The project identifier
+     * @return true if the container was restarted successfully, false if it was not found or restart failed
+     */
+    public boolean restartContainer(String projectId) {
+        String containerName = "myzen-" + projectId;
+        try {
+            ProcessBuilder restart = new ProcessBuilder("docker", "restart", containerName);
+            restart.redirectErrorStream(true);
+            logger.info("Restarting container: {}", containerName);
+            Process proc = restart.start();
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(proc.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    logger.info("docker restart: {}", line);
+                }
+            }
+            int exit = proc.waitFor();
+            if (exit == 0) {
+                logger.info("Container {} restarted successfully", containerName);
+                return true;
+            } else {
+                logger.error("docker restart failed with exit code {} for container {}", exit, containerName);
+                return false;
+            }
+        } catch (Exception e) {
+            logger.error("Failed to restart container for project {}", projectId, e);
+            return false;
         }
     }
 
